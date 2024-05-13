@@ -1,0 +1,12 @@
+transformers
+diffusers
+huggingface_hub
+gradio
+torch
+# torch==2.2.2+cu121
+fairscale
+numpy
+pillow
+torchdiffeq
+click
+git+https://github.com/Alpha-VLLM/Lumina-T2X
