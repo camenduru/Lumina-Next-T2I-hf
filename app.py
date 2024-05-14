@@ -435,7 +435,7 @@ def main():
     mode = "ODE"
 
     parser.add_argument("--num_gpus", type=int, default=1)
-    parser.add_argument("--ckpt", type=str, default="./checkpoints")
+    parser.add_argument("--ckpt", type=str, default="/home/user/app/checkpoints")
     parser.add_argument("--ema", type=bool, default=True)
     parser.add_argument("--precision", default="bf16", choices=["bf16", "fp32"])
 
@@ -557,12 +557,12 @@ def main():
                     #     ntk_scaling, proportional_attn
                     # ])
             with gr.Column():
-                default_img = Image.open("./image.png")
+                # default_img = Image.open("./image.png")
                 output_img = gr.Image(
                     label="Generated image",
                     interactive=False,
                     format="png",
-                    value=default_img,
+                    # value=default_img,
                 )
 
         with gr.Row():
