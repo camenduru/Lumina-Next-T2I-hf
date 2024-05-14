@@ -6,13 +6,11 @@ subprocess.run("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Nex
 import argparse
 import builtins
 import json
-import threading
 import random
 import socket
 import spaces
 import traceback
 import os
-from queue import Queue
 
 import fairscale.nn.model_parallel.initialize as fs_init
 import gradio as gr
@@ -23,7 +21,8 @@ import torch.distributed as dist
 from torchvision.transforms.functional import to_pil_image
 
 from PIL import Image
-from threading import Thread
+from queue import Queue
+from threading import Thread, Barrier
 
 import models
 
@@ -34,11 +33,8 @@ print(f"CUDA device: {torch.cuda.get_device_name(torch.cuda.current_device())}")
 
 description = """
     # Lumina Next Text-to-Image
-
     Lumina-Next-T2I is a 2B Next-DiT model with 2B text encoder.
-
     Demo current model: `Lumina-Next-T2I`
-
 """
 
 hf_token = os.environ['HF_TOKEN']
@@ -170,13 +166,15 @@ def load_model(args, master_port, rank):
 
 
 @torch.no_grad()
-def model_main(args, master_port, rank, request_queue, response_queue, text_encoder, tokenizer, vae, model):
+def model_main(args, master_port, rank, request_queue, response_queue, barrier, text_encoder, tokenizer, vae, model):
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
         args.precision
     ]
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
     
     with torch.autocast("cuda", dtype):
+        barrier.wait()
+        
         while True:
             (
                 cap,
@@ -439,7 +437,7 @@ def main():
     processes = []
     request_queues = []
     response_queue = Queue()
-    # mp_barrier = mp.Barrier(args.num_gpus + 1)
+    barrier = Barrier(args.num_gpus + 1)
     for i in range(args.num_gpus):
         text_encoder, tokenizer, vae, model = load_model(args, master_port, i)
         request_queues.append(Queue())
@@ -449,15 +447,15 @@ def main():
             rank=i,
             request_queue=request_queues[i],
             response_queue=response_queue if i == 0 else None,
+            barrier=barrier,
             text_encoder=text_encoder, 
             tokenizer=tokenizer, 
             vae=vae,
             model=model
         )
-        model_main(**generation_kwargs)
-        # thread = Thread(target=model_main, kwargs=generation_kwargs)
-        # thread.start()
-        # processes.append(thread)
+        thread = Thread(target=model_main, kwargs=generation_kwargs)
+        thread.start()
+        processes.append(thread)
 
     with gr.Blocks() as demo:
         with gr.Row():
@@ -609,7 +607,7 @@ def main():
             [output_img],
         )
 
-    # mp_barrier.wait()
+    barrier.wait()
     demo.queue(max_size=20).launch()
 
 
