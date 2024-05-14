@@ -1,5 +1,5 @@
 import subprocess
-subprocess.run('pip install flash-attn --no-build-isolation', shell=True)
+subprocess.run('pip install flash-attn --no-build-isolation', env={'FLASH_ATTENTION_SKIP_CUDA_BUILD': "TRUE"}, shell=True)
 subprocess.run("mkdir -p ./checkpoints", shell=True)
 subprocess.run("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Next-T2I --local-dir ./checkpoints --local-dir-use-symlinks False", shell=True)
 
