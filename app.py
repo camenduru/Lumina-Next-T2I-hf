@@ -45,7 +45,7 @@ description = """
 
 """
 
-examples =  [
+examples = [
     ["👽🤖👹👻"],
     ["孤舟蓑笠翁"],
     ["两只黄鹂鸣翠柳"],
@@ -75,7 +75,7 @@ examples =  [
     ["Cyberpunk eagle, neon ambiance, abstract black oil, gear mecha, detailed acrylic, grunge, intricate complexity, rendered in unreal engine 5, photorealistic, 8k"],
     ["close-up photo of a beautiful red rose breaking through a cube made of ice , splintered cracked ice surface, frosted colors, blood dripping from rose, melting ice, Valentine’s Day vibes, cinematic, sharp focus, intricate, cinematic, dramatic light"],
     ["3D cartoon Fox Head with Human Body, Wearing Iridescent Holographic Liquid Texture & Translucent Material Sun Protective Shirt, Boss Feel, Nike or Addidas Sun Protective Shirt, WitchPunk, Y2K Style, Green and blue, Blue, Metallic Feel, Strong Reflection, plain background, no background, pure single color background, Digital Fashion, Surreal Futurism, Supreme Kong NFT Artwork Style, disney style, headshot photography for portrait studio shoot, fashion editorial aesthetic, high resolution in the style of HAPE PRIME NFT, NFT 3D IP Feel, Bored Ape Yacht Club NFT project Feel, high detail, fine luster, 3D render, oc render, best quality, 8K, bright, front lighting, Face Shot, fine luster, ultra detailed"],
-],
+]
 
 class ModelFailure:
     pass
@@ -570,7 +570,7 @@ def main():
 
         with gr.Row():
             gr.Examples(
-                examples,
+                [examples],
                 [cap],
                 label="Examples",
             )
