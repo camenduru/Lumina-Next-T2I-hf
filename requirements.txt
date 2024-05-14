@@ -1,5 +1,9 @@
-transformers
-diffusers
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.0.1
+torchvision==0.15.2
+torchaudio==2.0.2
+transformers==4.31.0
+diffusers==0.26.3
 huggingface_hub
 spaces
 gradio
@@ -9,7 +13,3 @@ pillow
 torchdiffeq
 click
 git+https://github.com/Alpha-VLLM/Lumina-T2X
---extra-index-url https://download.pytorch.org/whl/cu118
-torch==2.0.1
-torchvision==0.15.2
-torchaudio==2.0.1
