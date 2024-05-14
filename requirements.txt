@@ -1,12 +1,14 @@
 --index-url https://download.pytorch.org/whl/cu118
 torch==2.0.1
+--index-url https://download.pytorch.org/whl/cu118
 torchvision==0.15.2
+--index-url https://download.pytorch.org/whl/cu118
 torchaudio==2.0.2
 transformers==4.31.0
 diffusers==0.26.3
 huggingface_hub
 spaces
-gradio
+gradio==4.31.0
 fairscale
 numpy
 pillow
