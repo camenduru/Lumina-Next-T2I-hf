@@ -6,21 +6,27 @@ subprocess.run("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Nex
 import argparse
 import builtins
 import json
-import multiprocessing as mp
+import threading
 import random
 import socket
 import spaces
 import traceback
 import os
+from queue import Queue
+
 import fairscale.nn.model_parallel.initialize as fs_init
 import gradio as gr
 import numpy as np
+
 import torch
 import torch.distributed as dist
 from torchvision.transforms.functional import to_pil_image
 
-import models
 from PIL import Image
+from threading import Thread
+
+import models
+
 from lumina_t2i.transport import create_transport, Sampler
 
 print(f"Is CUDA available: {torch.cuda.is_available()}")
@@ -113,7 +119,7 @@ def encode_prompt(
 
 
 @torch.no_grad()
-def model_main(args, master_port, rank, request_queue, response_queue, mp_barrier):
+def model_main(args, master_port, rank, request_queue, response_queue):
     # import here to avoid huggingface Tokenizer parallelism warnings
     from diffusers.models import AutoencoderKL
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -194,7 +200,7 @@ def model_main(args, master_port, rank, request_queue, response_queue, mp_barrie
     )
     model.load_state_dict(ckpt, strict=True)
 
-    mp_barrier.wait()
+    # mp_barrier.wait()
 
     with torch.autocast("cuda", dtype):
         while True:
@@ -458,23 +464,20 @@ def main():
 
     processes = []
     request_queues = []
-    response_queue = mp.Queue()
-    mp_barrier = mp.Barrier(args.num_gpus + 1)
+    response_queue = Queue()
+    # mp_barrier = mp.Barrier(args.num_gpus + 1)
     for i in range(args.num_gpus):
-        request_queues.append(mp.Queue())
-        p = mp.Process(
-            target=model_main,
-            args=(
-                args,
-                master_port,
-                i,
-                request_queues[i],
-                response_queue if i == 0 else None,
-                mp_barrier,
-            ),
+        request_queues.append(Queue())
+        generation_kwargs = dict(
+            args,
+            master_port,
+            i,
+            request_queues[i],
+            response_queue if i == 0 else None,
         )
-        p.start()
-        processes.append(p)
+        thread = Thread(target=model_main, kwargs=generation_kwargs)
+        thread.start()
+        processes.append(thread)
 
     with gr.Blocks() as demo:
         with gr.Row():
@@ -596,7 +599,7 @@ def main():
             [output_img],
         )
 
-    mp_barrier.wait()
+    # mp_barrier.wait()
     demo.queue(max_size=20).launch()
 
 
