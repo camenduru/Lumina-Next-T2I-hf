@@ -80,7 +80,7 @@ def encode_prompt(
     return prompt_embeds, prompt_masks
 
 
-def load_model(args, master_port, rank):
+def load_model(args, master_port, rank, barrier):
     # import here to avoid huggingface Tokenizer parallelism warnings
     from diffusers.models import AutoencoderKL
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -161,7 +161,7 @@ def load_model(args, master_port, rank):
     )
     model.load_state_dict(ckpt, strict=True)
 
-    # mp_barrier.wait()
+    barrier.wait()
     return text_encoder, tokenizer, vae, model
 
 
@@ -437,10 +437,11 @@ def main():
     processes = []
     request_queues = []
     response_queue = Queue()
-    barrier = Barrier(args.num_gpus + 1)
+    # mp_barrier = mp.Barrier(args.num_gpus + 1)
     for i in range(args.num_gpus):
-        text_encoder, tokenizer, vae, model = load_model(args, master_port, i)
+        text_encoder, tokenizer, vae, model = load_model(args, master_port, i, barrier)
         request_queues.append(Queue())
+        barrier = Barrier(args.num_gpus + 1)
         generation_kwargs = dict(
             args=args,
             master_port=master_port,
