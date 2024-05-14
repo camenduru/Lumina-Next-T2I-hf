@@ -434,7 +434,6 @@ def main():
 
     master_port = find_free_port()
 
-    processes = []
     request_queues = []
     response_queue = Queue()
     # mp_barrier = mp.Barrier(args.num_gpus + 1)
@@ -456,7 +455,6 @@ def main():
         )
         thread = Thread(target=model_main, kwargs=generation_kwargs)
         thread.start()
-        processes.append(thread)
 
     with gr.Blocks() as demo:
         with gr.Row():
