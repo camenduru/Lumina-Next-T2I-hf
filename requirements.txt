@@ -1,4 +1,4 @@
-setuptools>=61.0
+setuptools==61.0
 --index-url https://download.pytorch.org/whl/cu118
 torch==2.0.1
 --index-url https://download.pytorch.org/whl/cu118
