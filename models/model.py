@@ -592,7 +592,7 @@ class ParallelFinalLayer(nn.Module):
         return x
 
 
-class DiT_Llama(nn.Module):
+class NextDiT(nn.Module):
     """
     Diffusion model with a Transformer backbone.
     """
@@ -645,7 +645,7 @@ class DiT_Llama(nn.Module):
         assert (dim // n_heads) % 4 == 0, "2d rope needs head dim to be divisible by 4"
         self.dim = dim
         self.n_heads = n_heads
-        self.freqs_cis = DiT_Llama.precompute_freqs_cis(
+        self.freqs_cis = NextDiT.precompute_freqs_cis(
             dim // n_heads, 384, rope_scaling_factor=rope_scaling_factor, ntk_factor=ntk_factor
         )
         self.rope_scaling_factor = rope_scaling_factor
@@ -781,7 +781,7 @@ class DiT_Llama(nn.Module):
             ntk_factor = ntk_factor if ntk_factor is not None else self.ntk_factor
             if rope_scaling_factor != self.rope_scaling_factor or ntk_factor != self.ntk_factor:
                 print(f"override freqs_cis, rope_scaling {rope_scaling_factor}, ntk {ntk_factor}", flush=True)
-                self.freqs_cis = DiT_Llama.precompute_freqs_cis(
+                self.freqs_cis = NextDiT.precompute_freqs_cis(
                     self.dim // self.n_heads, 384,
                     rope_scaling_factor=rope_scaling_factor, ntk_factor=ntk_factor
                 )
@@ -882,27 +882,7 @@ class DiT_Llama(nn.Module):
 #############################################################################
 #                                 DiT Configs                               #
 #############################################################################
-
-
-def DiT_Llama_600M_patch2(**kwargs):
-    return DiT_Llama(
-        patch_size=2, dim=1536, n_layers=16, n_heads=32, **kwargs
-    )
-
-
-def DiT_Llama_2B_patch2(**kwargs):
-    return DiT_Llama(
+def NextDiT_2B_patch2(**kwargs):
+    return NextDiT(
         patch_size=2, dim=2304, n_layers=24, n_heads=32, **kwargs
-    )
-
-
-def DiT_Llama_3B_patch2(**kwargs):
-    return DiT_Llama(
-        patch_size=2, dim=3072, n_layers=32, n_heads=32, **kwargs
-    )
-
-
-def DiT_Llama_7B_patch2(**kwargs):
-    return DiT_Llama(
-        patch_size=2, dim=4096, n_layers=32, n_heads=32, **kwargs
     )
