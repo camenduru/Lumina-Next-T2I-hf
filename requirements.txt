@@ -3,12 +3,13 @@ diffusers
 huggingface_hub
 spaces
 gradio
-torch==2.2.2+cu121
-torchvision
-torchaudio
 fairscale
 numpy
 pillow
 torchdiffeq
 click
 git+https://github.com/Alpha-VLLM/Lumina-T2X
+torch==2.2.2+cu121
+torchvision===0.17.2+cu121
+torchaudio==2.2.2+cu121
+-f https://download.pytorch.org/whl/cu121
