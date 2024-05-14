@@ -112,7 +112,6 @@ def encode_prompt(
     return prompt_embeds, prompt_masks
 
 
-@spaces.GPU
 @torch.no_grad()
 def model_main(args, master_port, rank, request_queue, response_queue, mp_barrier):
     # import here to avoid huggingface Tokenizer parallelism warnings
@@ -430,6 +429,7 @@ def find_free_port() -> int:
     return port
 
 
+@spaces.GPU
 def main():
     parser = argparse.ArgumentParser()
     mode = "ODE"
@@ -601,5 +601,5 @@ def main():
 
 
 if __name__ == "__main__":
-    mp.set_start_method("spawn")
+    # mp.set_start_method("spawn")
     main()
