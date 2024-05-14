@@ -5,9 +5,7 @@ torchaudio==2.0.2
 --index-url https://pypi.org/simple 
 transformers==4.31.0
 diffusers==0.26.3
-huggingface_hub
 spaces
-gradio==4.31.0
 fairscale
 numpy
 pillow
