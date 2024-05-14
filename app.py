@@ -43,38 +43,6 @@ description = """
 
 hf_token = os.environ['HF_TOKEN']
 
-examples = [
-    ["👽🤖👹👻"],
-    ["孤舟蓑笠翁"],
-    ["两只黄鹂鸣翠柳"],
-    ["大漠孤烟直，长河落日圆"],
-    ["秋风起兮白云飞，草木黄落兮雁南归"],
-    ["도쿄 타워, 최고 품질의 우키요에, 에도 시대"],
-    ["味噌ラーメン, 最高品質の浮世絵、江戸時代。"],
-    ["東京タワー、最高品質の浮世絵、江戸時代。"],
-    ["Astronaut on Mars During sunset"],
-    ["Tour de Tokyo, estampes ukiyo-e de la plus haute qualité, période Edo"],
-    ["🐔 playing 🏀"],
-    ["☃️ with 🌹 in the ❄️"],
-    ["🐶 wearing 😎  flying on 🌈 "],
-    ["A small 🍎 and 🍊 with 😁 emoji in the Sahara desert"],
-    ["Токийская башня, лучшие укиё-э, период Эдо"],
-    ["Tokio-Turm, hochwertigste Ukiyo-e, Edo-Zeit"],
-    ["A scared cute rabbit in Happy Tree Friends style and punk vibe."],  # noqa
-    ["A humanoid eagle soldier of the First World War."],  # noqa
-    ["A cute Christmas mockup on an old wooden industrial desk table with Christmas decorations and bokeh lights in the background."],
-    ["A front view of a romantic flower shop in France filled with various blooming flowers including lavenders and roses."],
-    ["An old man, portrayed as a retro superhero, stands in the streets of New York City at night"],
-    ["many trees are surrounded by a lake in autumn colors, in the style of nature-inspired imagery, havencore, brightly colored, dark white and dark orange, bright primary colors, environmental activism, forestpunk --ar 64:51"],
-    ["A fluffy mouse holding a watermelon, in a magical and colorful setting, illustrated in the style of Hayao Miyazaki anime by Studio Ghibli."],
-    ["Inka warrior with a war make up, medium shot, natural light, Award winning wildlife photography, hyperrealistic, 8k resolution, --ar 9:16"],
-    ["Character of lion in style of saiyan, mafia, gangsta, citylights background, Hyper detailed, hyper realistic, unreal engine ue5, cgi 3d, cinematic shot, 8k"],
-    ["In the sky above, a giant, whimsical cloud shaped like the 😊 emoji casts a soft, golden light over the scene"],
-    ["Cyberpunk eagle, neon ambiance, abstract black oil, gear mecha, detailed acrylic, grunge, intricate complexity, rendered in unreal engine 5, photorealistic, 8k"],
-    ["close-up photo of a beautiful red rose breaking through a cube made of ice , splintered cracked ice surface, frosted colors, blood dripping from rose, melting ice, Valentine’s Day vibes, cinematic, sharp focus, intricate, cinematic, dramatic light"],
-    ["3D cartoon Fox Head with Human Body, Wearing Iridescent Holographic Liquid Texture & Translucent Material Sun Protective Shirt, Boss Feel, Nike or Addidas Sun Protective Shirt, WitchPunk, Y2K Style, Green and blue, Blue, Metallic Feel, Strong Reflection, plain background, no background, pure single color background, Digital Fashion, Surreal Futurism, Supreme Kong NFT Artwork Style, disney style, headshot photography for portrait studio shoot, fashion editorial aesthetic, high resolution in the style of HAPE PRIME NFT, NFT 3D IP Feel, Bored Ape Yacht Club NFT project Feel, high detail, fine luster, 3D render, oc render, best quality, 8K, bright, front lighting, Face Shot, fine luster, ultra detailed"],
-]
-
 class ModelFailure:
     pass
 
@@ -116,8 +84,7 @@ def encode_prompt(
     return prompt_embeds, prompt_masks
 
 
-@torch.no_grad()
-def model_main(args, master_port, rank, request_queue, response_queue):
+def load_model(args, master_port, rank):
     # import here to avoid huggingface Tokenizer parallelism warnings
     from diffusers.models import AutoencoderKL
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -199,7 +166,16 @@ def model_main(args, master_port, rank, request_queue, response_queue):
     model.load_state_dict(ckpt, strict=True)
 
     # mp_barrier.wait()
+    return text_encoder, tokenizer, vae, model
 
+
+@torch.no_grad()
+def model_main(args, master_port, rank, request_queue, response_queue, text_encoder, tokenizer, vae, model):
+    dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
+        args.precision
+    ]
+    train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
+    
     with torch.autocast("cuda", dtype):
         while True:
             (
@@ -465,6 +441,7 @@ def main():
     response_queue = Queue()
     # mp_barrier = mp.Barrier(args.num_gpus + 1)
     for i in range(args.num_gpus):
+        text_encoder, tokenizer, vae, model = load_model(args, master_port, i)
         request_queues.append(Queue())
         generation_kwargs = dict(
             args=args,
@@ -472,6 +449,10 @@ def main():
             rank=i,
             request_queue=request_queues[i],
             response_queue=response_queue if i == 0 else None,
+            text_encoder=text_encoder, 
+            tokenizer=tokenizer, 
+            vae=vae,
+            model=model
         )
         thread = Thread(target=model_main, kwargs=generation_kwargs)
         thread.start()
@@ -568,7 +549,37 @@ def main():
 
         with gr.Row():
             gr.Examples(
-                [examples],
+                [
+                    ["👽🤖👹👻"],
+                    ["孤舟蓑笠翁"],
+                    ["两只黄鹂鸣翠柳"],
+                    ["大漠孤烟直，长河落日圆"],
+                    ["秋风起兮白云飞，草木黄落兮雁南归"],
+                    ["도쿄 타워, 최고 품질의 우키요에, 에도 시대"],
+                    ["味噌ラーメン, 最高品質の浮世絵、江戸時代。"],
+                    ["東京タワー、最高品質の浮世絵、江戸時代。"],
+                    ["Astronaut on Mars During sunset"],
+                    ["Tour de Tokyo, estampes ukiyo-e de la plus haute qualité, période Edo"],
+                    ["🐔 playing 🏀"],
+                    ["☃️ with 🌹 in the ❄️"],
+                    ["🐶 wearing 😎  flying on 🌈 "],
+                    ["A small 🍎 and 🍊 with 😁 emoji in the Sahara desert"],
+                    ["Токийская башня, лучшие укиё-э, период Эдо"],
+                    ["Tokio-Turm, hochwertigste Ukiyo-e, Edo-Zeit"],
+                    ["A scared cute rabbit in Happy Tree Friends style and punk vibe."],  # noqa
+                    ["A humanoid eagle soldier of the First World War."],  # noqa
+                    ["A cute Christmas mockup on an old wooden industrial desk table with Christmas decorations and bokeh lights in the background."],
+                    ["A front view of a romantic flower shop in France filled with various blooming flowers including lavenders and roses."],
+                    ["An old man, portrayed as a retro superhero, stands in the streets of New York City at night"],
+                    ["many trees are surrounded by a lake in autumn colors, in the style of nature-inspired imagery, havencore, brightly colored, dark white and dark orange, bright primary colors, environmental activism, forestpunk --ar 64:51"],
+                    ["A fluffy mouse holding a watermelon, in a magical and colorful setting, illustrated in the style of Hayao Miyazaki anime by Studio Ghibli."],
+                    ["Inka warrior with a war make up, medium shot, natural light, Award winning wildlife photography, hyperrealistic, 8k resolution, --ar 9:16"],
+                    ["Character of lion in style of saiyan, mafia, gangsta, citylights background, Hyper detailed, hyper realistic, unreal engine ue5, cgi 3d, cinematic shot, 8k"],
+                    ["In the sky above, a giant, whimsical cloud shaped like the 😊 emoji casts a soft, golden light over the scene"],
+                    ["Cyberpunk eagle, neon ambiance, abstract black oil, gear mecha, detailed acrylic, grunge, intricate complexity, rendered in unreal engine 5, photorealistic, 8k"],
+                    ["close-up photo of a beautiful red rose breaking through a cube made of ice , splintered cracked ice surface, frosted colors, blood dripping from rose, melting ice, Valentine’s Day vibes, cinematic, sharp focus, intricate, cinematic, dramatic light"],
+                    ["3D cartoon Fox Head with Human Body, Wearing Iridescent Holographic Liquid Texture & Translucent Material Sun Protective Shirt, Boss Feel, Nike or Addidas Sun Protective Shirt, WitchPunk, Y2K Style, Green and blue, Blue, Metallic Feel, Strong Reflection, plain background, no background, pure single color background, Digital Fashion, Surreal Futurism, Supreme Kong NFT Artwork Style, disney style, headshot photography for portrait studio shoot, fashion editorial aesthetic, high resolution in the style of HAPE PRIME NFT, NFT 3D IP Feel, Bored Ape Yacht Club NFT project Feel, high detail, fine luster, 3D render, oc render, best quality, 8K, bright, front lighting, Face Shot, fine luster, ultra detailed"],
+                ],
                 [cap],
                 label="Examples",
             )
