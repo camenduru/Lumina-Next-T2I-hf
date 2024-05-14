@@ -39,11 +39,9 @@ description = """
 
     Demo current model: `Lumina-Next-T2I`
 
-    ### <span style='color: red;'>Due to the high volume of access, we have temporarily disabled the resolution extrapolation functionality. 
-
-    ### Additionally, we offer three alternative links for Lumina-T2X access. Try to visit other demo sites. [[demo1](http://106.14.2.150:10022/)] [[demo2](http://106.14.2.150:10023/)]
-
 """
+
+hf_token = os.environ['HF_TOKEN']
 
 examples = [
     ["👽🤖👹👻"],
@@ -159,7 +157,7 @@ def model_main(args, master_port, rank, request_queue, response_queue):
 
     text_encoder = (
         AutoModelForCausalLM.from_pretrained(
-            "google/gemma-2b", torch_dtype=dtype, device_map="cuda"
+            "google/gemma-2b", torch_dtype=dtype, device_map="cuda", token=hf_token,
         )
         .get_decoder()
         .eval()
@@ -169,7 +167,7 @@ def model_main(args, master_port, rank, request_queue, response_queue):
         raise NotImplementedError("Inference with >1 GPUs not yet supported")
 
     tokenizer = AutoTokenizer.from_pretrained(
-        "google/gemma-2b", add_bos_token=True, add_eos_token=True
+        "google/gemma-2b", add_bos_token=True, add_eos_token=True, token=hf_token,
     )
     tokenizer.padding_side = "right"
 
@@ -182,7 +180,7 @@ def model_main(args, master_port, rank, request_queue, response_queue):
     if dist.get_rank() == 0:
         print(f"Creating DiT: Next-DiT")
     # latent_size = train_args.image_size // 8
-    model = models.__dict__["DiT_Llama_2B_patch2"](
+    model = models.__dict__["Next-DiT"](
         qk_norm=train_args.qk_norm,
         cap_feat_dim=cap_feat_dim,
     )
