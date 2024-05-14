@@ -3,6 +3,8 @@ diffusers
 huggingface_hub
 gradio
 torch
+torchvision
+torchaudio
 # torch==2.2.2+cu121
 fairscale
 numpy
