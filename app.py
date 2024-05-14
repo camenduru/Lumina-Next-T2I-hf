@@ -23,6 +23,9 @@ import models
 from PIL import Image
 from lumina_t2i.transport import create_transport, Sampler
 
+print(f"Is CUDA available: {torch.cuda.is_available()}")
+print(f"CUDA device: {torch.cuda.get_device_name(torch.cuda.current_device())}")
+
 description = """
     # Lumina Next Text-to-Image
 
