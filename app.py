@@ -180,7 +180,7 @@ def model_main(args, master_port, rank, request_queue, response_queue):
     if dist.get_rank() == 0:
         print(f"Creating DiT: Next-DiT")
     # latent_size = train_args.image_size // 8
-    model = models.__dict__["Next-DiT"](
+    model = models.__dict__["NextDiT_2B_patch2"](
         qk_norm=train_args.qk_norm,
         cap_feat_dim=cap_feat_dim,
     )
