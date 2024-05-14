@@ -1,6 +1,7 @@
 transformers
 diffusers
 huggingface_hub
+spaces
 gradio
 torch
 torchvision
