@@ -10,5 +10,6 @@ fairscale
 numpy
 pillow
 torchdiffeq
+flash_attn
 click
 git+https://github.com/Alpha-VLLM/Lumina-T2X
