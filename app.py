@@ -1,8 +1,12 @@
+import os
+os.system("mkdir -p ./checkpoints")
+os.system("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Next-T2I --local-dir ./checkpoints --local-dir-use-symlinks False")
+os.system("pip install flash-attn --no-build-isolation")
+
 import argparse
 import builtins
 import json
 import multiprocessing as mp
-import os, sys
 import random
 import socket
 import traceback
@@ -592,8 +596,5 @@ def main():
 
 
 if __name__ == "__main__":
-    os.system("mkdir -p ./checkpoints")
-    os.system("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Next-T2I --local-dir ./checkpoints --local-dir-use-symlinks False")
-    os.system("pip install flash-attn --no-build-isolation")
     mp.set_start_method("spawn")
     main()
