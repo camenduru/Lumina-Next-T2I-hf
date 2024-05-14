@@ -3,10 +3,9 @@ diffusers
 huggingface_hub
 spaces
 gradio
-torch
+torch==2.2.2+cu121
 torchvision
 torchaudio
-# torch==2.2.2+cu121
 fairscale
 numpy
 pillow
