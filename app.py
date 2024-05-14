@@ -454,9 +454,10 @@ def main():
             vae=vae,
             model=model
         )
-        thread = Thread(target=model_main, kwargs=generation_kwargs)
-        thread.start()
-        processes.append(thread)
+        model_main(**generation_kwargs)
+        # thread = Thread(target=model_main, kwargs=generation_kwargs)
+        # thread.start()
+        # processes.append(thread)
 
     with gr.Blocks() as demo:
         with gr.Row():
@@ -589,7 +590,7 @@ def main():
                 q.put(args)
             result = response_queue.get()
             if isinstance(result, ModelFailure):
-                raise RuntimeError
+                raise RuntimeError("Model failed to generate the image.")
             return result
 
         submit_btn.click(
