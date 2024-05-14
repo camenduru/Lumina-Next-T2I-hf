@@ -9,6 +9,7 @@ import json
 import multiprocessing as mp
 import random
 import socket
+import spaces
 import traceback
 
 import fairscale.nn.model_parallel.initialize as fs_init
@@ -108,6 +109,7 @@ def encode_prompt(
     return prompt_embeds, prompt_masks
 
 
+@spaces.GPU
 @torch.no_grad()
 def model_main(args, master_port, rank, request_queue, response_queue, mp_barrier):
     # import here to avoid huggingface Tokenizer parallelism warnings
@@ -592,7 +594,7 @@ def main():
         )
 
     mp_barrier.wait()
-    demo.queue().launch(share=True, server_name="0.0.0.0")
+    demo.queue(max_size=20).launch()
 
 
 if __name__ == "__main__":
