@@ -469,11 +469,11 @@ def main():
     for i in range(args.num_gpus):
         request_queues.append(Queue())
         generation_kwargs = dict(
-            args,
-            master_port,
-            i,
-            request_queues[i],
-            response_queue if i == 0 else None,
+            args=args,
+            master_port=master_port,
+            rank=i,
+            request_queue=request_queues[i],
+            response_queue=response_queue if i == 0 else None,
         )
         thread = Thread(target=model_main, kwargs=generation_kwargs)
         thread.start()
