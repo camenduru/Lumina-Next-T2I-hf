@@ -1,7 +1,7 @@
-import os
-os.system("mkdir -p ./checkpoints")
-os.system("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Next-T2I --local-dir ./checkpoints --local-dir-use-symlinks False")
-os.system("pip install flash-attn --no-build-isolation")
+import subprocess
+subprocess.run('pip install flash-attn --no-build-isolation', env={'FLASH_ATTENTION_SKIP_CUDA_BUILD': "TRUE"}, shell=True)
+subprocess.run("mkdir -p ./checkpoints", shell=True)
+subprocess.run("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Next-T2I --local-dir ./checkpoints --local-dir-use-symlinks False", shell=True)
 
 import argparse
 import builtins
@@ -11,7 +11,7 @@ import random
 import socket
 import spaces
 import traceback
-
+import os
 import fairscale.nn.model_parallel.initialize as fs_init
 import gradio as gr
 import numpy as np
