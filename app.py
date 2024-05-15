@@ -1,7 +1,6 @@
 import subprocess
 subprocess.run('pip install flash-attn --no-build-isolation', env={'FLASH_ATTENTION_SKIP_CUDA_BUILD': "TRUE"}, shell=True)
 subprocess.run("mkdir -p ./checkpoints", shell=True)
-subprocess.run("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Next-T2I --local-dir ./checkpoints --local-dir-use-symlinks False", shell=True)
 
 import argparse
 import builtins
@@ -152,6 +151,8 @@ def load_model(args, master_port, rank):
     assert train_args.model_parallel_size == args.num_gpus
     if args.ema:
         print("Loading ema model.")
+
+    subprocess.run("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Next-T2I --local-dir ./checkpoints --local-dir-use-symlinks False", shell=True)
     ckpt = torch.load(
         os.path.join(
             args.ckpt,
@@ -439,7 +440,7 @@ def main():
     # barrier = Barrier(args.num_gpus + 1)
     for i in range(args.num_gpus):
         text_encoder, tokenizer, vae, model = load_model(args, master_port, i)
-        # request_queues.append(Queue())
+        request_queues.append(Queue())
         generation_kwargs = dict(
             args=args,
             master_port=master_port,
