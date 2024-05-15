@@ -1,3 +1,4 @@
+import os
 import subprocess
 subprocess.run('pip install flash-attn --no-build-isolation', env={'FLASH_ATTENTION_SKIP_CUDA_BUILD': "TRUE"}, shell=True)
 
@@ -12,7 +13,6 @@ import random
 import socket
 import spaces
 import traceback
-import os
 
 import fairscale.nn.model_parallel.initialize as fs_init
 import gradio as gr
