@@ -412,6 +412,7 @@ def find_free_port() -> int:
     return port
 
 
+@spaces.GPU
 def main():
     parser = argparse.ArgumentParser()
     mode = "ODE"
