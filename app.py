@@ -83,7 +83,7 @@ def encode_prompt(
     return prompt_embeds, prompt_masks
 
 
-@spaces.GPU
+@spaces.GPU(duration=200)
 def load_model(args, master_port, rank):
     # import here to avoid huggingface Tokenizer parallelism warnings
     from diffusers.models import AutoencoderKL
