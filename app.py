@@ -171,7 +171,7 @@ def load_model(args, master_port, rank):
 
 @spaces.GPU
 @torch.no_grad()
-def model_main(args, master_port, rank, request_queue, response_queue, text_encoder, tokenizer, vae, model):
+def model_main(args, master_port, rank, request_queue, response_queue):
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
         args.precision
     ]
