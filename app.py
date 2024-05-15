@@ -1,6 +1,9 @@
 import subprocess
 subprocess.run('pip install flash-attn --no-build-isolation', env={'FLASH_ATTENTION_SKIP_CUDA_BUILD': "TRUE"}, shell=True)
-subprocess.run("mkdir -p ./checkpoints", shell=True)
+
+from huggingface_hub import snapshot_download
+os.makedirs("/home/user/app/checkpoints", exist_ok=True)
+snapshot_download(repo_id="Alpha-VLLM/Lumina-Next-T2I", local_dir="/home/user/app/checkpoints")
 
 import argparse
 import builtins
@@ -151,8 +154,6 @@ def load_model(args, master_port, rank):
     assert train_args.model_parallel_size == args.num_gpus
     if args.ema:
         print("Loading ema model.")
-
-    subprocess.run("huggingface-cli download --resume-download Alpha-VLLM/Lumina-Next-T2I --local-dir ./checkpoints --local-dir-use-symlinks False", shell=True)
     ckpt = torch.load(
         os.path.join(
             args.ckpt,
@@ -166,13 +167,15 @@ def load_model(args, master_port, rank):
     return text_encoder, tokenizer, vae, model
 
 
+@spaces.GPU(duration=80)
 @torch.no_grad()
 def model_main(args, master_port, rank, request_queue, response_queue, text_encoder, tokenizer, vae, model):
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
         args.precision
     ]
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
-    
+    text_encoder, tokenizer, vae, model = load_model(args, master_port, rank)
+
     with torch.autocast("cuda", dtype):
         # barrier.wait()
         while True:
@@ -407,7 +410,6 @@ def find_free_port() -> int:
     return port
 
 
-@spaces.GPU
 def main():
     parser = argparse.ArgumentParser()
     mode = "ODE"
@@ -439,7 +441,6 @@ def main():
     # mp_barrier = mp.Barrier(args.num_gpus + 1)
     # barrier = Barrier(args.num_gpus + 1)
     for i in range(args.num_gpus):
-        text_encoder, tokenizer, vae, model = load_model(args, master_port, i)
         request_queues.append(Queue())
         generation_kwargs = dict(
             args=args,
@@ -447,10 +448,6 @@ def main():
             rank=i,
             request_queue=request_queues[i],
             response_queue=response_queue if i == 0 else None,
-            text_encoder=text_encoder, 
-            tokenizer=tokenizer, 
-            vae=vae,
-            model=model
         )
         model_main(**generation_kwargs)
         # thread = Thread(target=model_main, kwargs=generation_kwargs)
