@@ -46,6 +46,7 @@ class ModelFailure:
 
 
 # Adapted from pipelines.StableDiffusionXLPipeline.encode_prompt
+@spaces.GPU
 def encode_prompt(
     prompt_batch, text_encoder, tokenizer, proportion_empty_prompts, is_train=True
 ):
@@ -82,6 +83,7 @@ def encode_prompt(
     return prompt_embeds, prompt_masks
 
 
+@spaces.GPU
 def load_model(args, master_port, rank):
     # import here to avoid huggingface Tokenizer parallelism warnings
     from diffusers.models import AutoencoderKL
@@ -167,7 +169,7 @@ def load_model(args, master_port, rank):
     return text_encoder, tokenizer, vae, model
 
 
-@spaces.GPU(duration=80)
+@spaces.GPU
 @torch.no_grad()
 def model_main(args, master_port, rank, request_queue, response_queue, text_encoder, tokenizer, vae, model):
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
