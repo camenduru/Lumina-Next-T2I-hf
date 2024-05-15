@@ -80,7 +80,7 @@ def encode_prompt(
     return prompt_embeds, prompt_masks
 
 
-def load_model(args, master_port, rank, barrier):
+def load_model(args, master_port, rank):
     # import here to avoid huggingface Tokenizer parallelism warnings
     from diffusers.models import AutoencoderKL
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -161,20 +161,19 @@ def load_model(args, master_port, rank, barrier):
     )
     model.load_state_dict(ckpt, strict=True)
 
-    barrier.wait()
+    # barrier.wait()
     return text_encoder, tokenizer, vae, model
 
 
 @torch.no_grad()
-def model_main(args, master_port, rank, request_queue, response_queue, barrier, text_encoder, tokenizer, vae, model):
+def model_main(args, master_port, rank, request_queue, response_queue, text_encoder, tokenizer, vae, model):
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
         args.precision
     ]
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
     
     with torch.autocast("cuda", dtype):
-        barrier.wait()
-        
+        # barrier.wait()
         while True:
             (
                 cap,
@@ -437,24 +436,24 @@ def main():
     request_queues = []
     response_queue = Queue()
     # mp_barrier = mp.Barrier(args.num_gpus + 1)
-    barrier = Barrier(args.num_gpus + 1)
+    # barrier = Barrier(args.num_gpus + 1)
     for i in range(args.num_gpus):
-        text_encoder, tokenizer, vae, model = load_model(args, master_port, i, barrier)
-        request_queues.append(Queue())
+        text_encoder, tokenizer, vae, model = load_model(args, master_port, i)
+        # request_queues.append(Queue())
         generation_kwargs = dict(
             args=args,
             master_port=master_port,
             rank=i,
             request_queue=request_queues[i],
             response_queue=response_queue if i == 0 else None,
-            barrier=barrier,
             text_encoder=text_encoder, 
             tokenizer=tokenizer, 
             vae=vae,
             model=model
         )
-        thread = Thread(target=model_main, kwargs=generation_kwargs)
-        thread.start()
+        model_main(**generation_kwargs)
+        # thread = Thread(target=model_main, kwargs=generation_kwargs)
+        # thread.start()
 
     with gr.Blocks() as demo:
         with gr.Row():
@@ -606,7 +605,7 @@ def main():
             [output_img],
         )
 
-    barrier.wait()
+    # barrier.wait()
     demo.queue(max_size=20).launch()
 
 
