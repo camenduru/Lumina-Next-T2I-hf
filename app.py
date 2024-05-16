@@ -183,7 +183,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
     # vae = vae.cuda()
     # model = model.to("cuda", dtype=dtype)
 
-    with torch.autocast(device, dtype):
+    with torch.autocast("cuda", dtype):
         (
             cap,
             resolution,
@@ -244,7 +244,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             latent_w, latent_h = w // 8, h // 8
             if int(seed) != 0:
                 torch.random.manual_seed(int(seed))
-            z = torch.randn([1, 4, latent_h, latent_w], device=device).to(dtype)
+            z = torch.randn([1, 4, latent_h, latent_w], device="cuda").to(dtype)
             z = z.repeat(2, 1, 1, 1)
 
             with torch.no_grad():
