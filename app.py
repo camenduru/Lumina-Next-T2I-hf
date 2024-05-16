@@ -522,26 +522,14 @@ def main():
             gr.Examples(
                 [
                     ["👽🤖👹👻"],
-                    ["孤舟蓑笠翁"],
-                    ["两只黄鹂鸣翠柳"],
-                    ["大漠孤烟直，长河落日圆"],
-                    ["秋风起兮白云飞，草木黄落兮雁南归"],
-                    ["도쿄 타워, 최고 품질의 우키요에, 에도 시대"],
-                    ["味噌ラーメン, 最高品質の浮世絵、江戸時代。"],
-                    ["東京タワー、最高品質の浮世絵、江戸時代。"],
-                    ["Astronaut on Mars During sunset"],
-                    [
-                        "Tour de Tokyo, estampes ukiyo-e de la plus haute qualité, période Edo"
-                    ],
                     ["🐔 playing 🏀"],
                     ["☃️ with 🌹 in the ❄️"],
                     ["🐶 wearing 😎  flying on 🌈 "],
                     ["A small 🍎 and 🍊 with 😁 emoji in the Sahara desert"],
-                    ["Токийская башня, лучшие укиё-э, период Эдо"],
-                    ["Tokio-Turm, hochwertigste Ukiyo-e, Edo-Zeit"],
+                    ["Astronaut on Mars During sunset"],
                     [
                         "A scared cute rabbit in Happy Tree Friends style and punk vibe."
-                    ],  # noqa
+                    ],
                     ["A humanoid eagle soldier of the First World War."],  # noqa
                     [
                         "A cute Christmas mockup on an old wooden industrial desk table with Christmas decorations and bokeh lights in the background."
@@ -558,6 +546,18 @@ def main():
                     [
                         "A fluffy mouse holding a watermelon, in a magical and colorful setting, illustrated in the style of Hayao Miyazaki anime by Studio Ghibli."
                     ],
+                    ["孤舟蓑笠翁"],
+                    ["两只黄鹂鸣翠柳"],
+                    ["大漠孤烟直，长河落日圆"],
+                    ["秋风起兮白云飞，草木黄落兮雁南归"],
+                    ["味噌ラーメン, 最高品質の浮世絵、江戸時代。"],
+                    ["東京タワー、最高品質の浮世絵、江戸時代。"],
+                    ["도쿄 타워, 최고 품질의 우키요에, 에도 시대"],
+                    [
+                        "Tour de Tokyo, estampes ukiyo-e de la plus haute qualité, période Edo"
+                    ],
+                    ["Токийская башня, лучшие укиё-э, период Эдо"],
+                    ["Tokio-Turm, hochwertigste Ukiyo-e, Edo-Zeit"],
                     [
                         "Inka warrior with a war make up, medium shot, natural light, Award winning wildlife photography, hyperrealistic, 8k resolution, --ar 9:16"
                     ],
