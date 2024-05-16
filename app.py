@@ -181,12 +181,6 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
 
     print(args)
-
-    os.environ["MASTER_PORT"] = str(60001)
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["RANK"] = str(0)
-    os.environ["WORLD_SIZE"] = str(args.num_gpus)
-
     torch.cuda.set_device(0)
 
     # loading model to gpu
@@ -195,7 +189,6 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
     model = model.to("cuda", dtype=dtype)
 
     with torch.autocast("cuda", dtype):
-        # barrier.wait()
         (
             cap,
             resolution,
