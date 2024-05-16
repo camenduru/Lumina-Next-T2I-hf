@@ -1,16 +1,25 @@
 import os
 import subprocess
-subprocess.run('pip install flash-attn --no-build-isolation', env={'FLASH_ATTENTION_SKIP_CUDA_BUILD': "TRUE"}, shell=True)
+
+subprocess.run(
+    "pip install flash-attn --no-build-isolation",
+    env={"FLASH_ATTENTION_SKIP_CUDA_BUILD": "TRUE"},
+    shell=True,
+)
 
 from huggingface_hub import snapshot_download
+
 os.makedirs("/home/user/app/checkpoints", exist_ok=True)
-snapshot_download(repo_id="Alpha-VLLM/Lumina-Next-T2I", local_dir="/home/user/app/checkpoints")
+snapshot_download(
+    repo_id="Alpha-VLLM/Lumina-Next-T2I", local_dir="/home/user/app/checkpoints"
+)
 
 import argparse
 import builtins
 import json
 import random
 import socket
+
 import spaces
 import traceback
 
@@ -39,14 +48,14 @@ description = """
     Demo current model: `Lumina-Next-T2I`
 """
 
-hf_token = os.environ['HF_TOKEN']
+hf_token = os.environ["HF_TOKEN"]
+
 
 class ModelFailure:
     pass
 
 
 # Adapted from pipelines.StableDiffusionXLPipeline.encode_prompt
-@spaces.GPU
 def encode_prompt(
     prompt_batch, text_encoder, tokenizer, proportion_empty_prompts, is_train=True
 ):
@@ -83,8 +92,7 @@ def encode_prompt(
     return prompt_embeds, prompt_masks
 
 
-@spaces.GPU(duration=200)
-def load_model(args, master_port, rank):
+def load_models(args, master_port, rank):
     # import here to avoid huggingface Tokenizer parallelism warnings
     from diffusers.models import AutoencoderKL
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -100,31 +108,21 @@ def load_model(args, master_port, rank):
     # Override the built-in print with the new version
     builtins.print = print
 
-    os.environ["MASTER_PORT"] = str(master_port)
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["RANK"] = str(rank)
-    os.environ["WORLD_SIZE"] = str(args.num_gpus)
-
-    dist.init_process_group("nccl")
-    # set up fairscale environment because some methods of the Lumina model need it,
-    # though for single-GPU inference fairscale actually has no effect
-    fs_init.initialize_model_parallel(args.num_gpus)
-    torch.cuda.set_device(rank)
-
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
-    if dist.get_rank() == 0:
-        print("Loaded model arguments:", json.dumps(train_args.__dict__, indent=2))
-
-    if dist.get_rank() == 0:
-        print(f"Creating lm: Gemma-2B")
+    print("Loaded model arguments:", json.dumps(train_args.__dict__, indent=2))
 
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
         args.precision
     ]
 
+    print(f"Creating lm: Gemma-2B")
     text_encoder = (
         AutoModelForCausalLM.from_pretrained(
-            "google/gemma-2b", torch_dtype=dtype, device_map="cuda", token=hf_token,
+            "google/gemma-2b",
+            torch_dtype=dtype,
+            device_map="cpu",
+            # device_map="cuda",
+            token=hf_token,
         )
         .get_decoder()
         .eval()
@@ -134,24 +132,27 @@ def load_model(args, master_port, rank):
         raise NotImplementedError("Inference with >1 GPUs not yet supported")
 
     tokenizer = AutoTokenizer.from_pretrained(
-        "google/gemma-2b", add_bos_token=True, add_eos_token=True, token=hf_token,
+        "google/gemma-2b",
+        add_bos_token=True,
+        add_eos_token=True,
+        token=hf_token,
     )
     tokenizer.padding_side = "right"
 
-    if dist.get_rank() == 0:
-        print(f"Creating vae: sdxl-vae")
-    vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae",
+    print(f"Creating vae: sdxl-vae")
+    vae = AutoencoderKL.from_pretrained(
+        "stabilityai/sdxl-vae",
         torch_dtype=torch.float32,
-    ).cuda()
+    )
 
-    if dist.get_rank() == 0:
-        print(f"Creating DiT: Next-DiT")
+    print(f"Creating DiT: Next-DiT")
     # latent_size = train_args.image_size // 8
     model = models.__dict__["NextDiT_2B_patch2"](
         qk_norm=train_args.qk_norm,
         cap_feat_dim=cap_feat_dim,
     )
-    model.eval().to("cuda", dtype=dtype)
+    # model.eval().to("cuda", dtype=dtype)
+    model.eval()
 
     assert train_args.model_parallel_size == args.num_gpus
     if args.ema:
@@ -169,137 +170,141 @@ def load_model(args, master_port, rank):
     return text_encoder, tokenizer, vae, model
 
 
-@spaces.GPU
 @torch.no_grad()
-def model_main(args, master_port, rank, request_queue, response_queue):
+def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
         args.precision
     ]
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
-    text_encoder, tokenizer, vae, model = load_model(args, master_port, rank)
+
+    print(args)
+
+    os.environ["MASTER_PORT"] = str(60001)
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["RANK"] = str(0)
+    os.environ["WORLD_SIZE"] = str(args.num_gpus)
+
+    # dist.init_process_group("nccl")
+    # set up fairscale environment because some methods of the Lumina model need it,
+    # though for single-GPU inference fairscale actually has no effect
+    # fs_init.initialize_model_parallel(args.num_gpus)
+    torch.cuda.set_device(0)
+
+    # loading model to gpu
+    text_encoder = text_encoder.cuda()
+    vae = vae.cuda()
+    model = model.to("cuda", dtype=dtype)
 
     with torch.autocast("cuda", dtype):
         # barrier.wait()
-        while True:
-            (
-                cap,
-                resolution,
-                num_sampling_steps,
-                cfg_scale,
-                solver,
-                t_shift,
-                seed,
-                ntk_scaling,
-                proportional_attn,
-            ) = request_queue.get()
+        (
+            cap,
+            resolution,
+            num_sampling_steps,
+            cfg_scale,
+            solver,
+            t_shift,
+            seed,
+            ntk_scaling,
+            proportional_attn,
+        ) = infer_args
 
-            print(
-                "> params:",
-                cap,
-                resolution,
-                num_sampling_steps,
-                cfg_scale,
-                solver,
-                t_shift,
-                seed,
-                ntk_scaling,
-                proportional_attn,
+        print(
+            "> params:",
+            cap,
+            resolution,
+            num_sampling_steps,
+            cfg_scale,
+            solver,
+            t_shift,
+            seed,
+            ntk_scaling,
+            proportional_attn,
+        )
+        try:
+            # begin sampler
+            transport = create_transport(
+                args.path_type,
+                args.prediction,
+                args.loss_weight,
+                args.train_eps,
+                args.sample_eps,
             )
-            try:
-                # begin sampler
-                transport = create_transport(
-                    args.path_type,
-                    args.prediction,
-                    args.loss_weight,
-                    args.train_eps,
-                    args.sample_eps,
+            sampler = Sampler(transport)
+            if args.likelihood:
+                # assert args.cfg_scale == 1, "Likelihood is incompatible with guidance"  # todo
+                sample_fn = sampler.sample_ode_likelihood(
+                    sampling_method=solver,
+                    num_steps=num_sampling_steps,
+                    atol=args.atol,
+                    rtol=args.rtol,
                 )
-                sampler = Sampler(transport)
-                if args.sampler_mode == "ODE":
-                    if args.likelihood:
-                        # assert args.cfg_scale == 1, "Likelihood is incompatible with guidance"  # todo
-                        sample_fn = sampler.sample_ode_likelihood(
-                            sampling_method=solver,
-                            num_steps=num_sampling_steps,
-                            atol=args.atol,
-                            rtol=args.rtol,
-                        )
-                    else:
-                        sample_fn = sampler.sample_ode(
-                            sampling_method=solver,
-                            num_steps=num_sampling_steps,
-                            atol=args.atol,
-                            rtol=args.rtol,
-                            reverse=args.reverse,
-                            time_shifting_factor=t_shift,
-                        )
-                elif args.sampler_mode == "SDE":
-                    sample_fn = sampler.sample_sde(
-                        sampling_method=solver,
-                        diffusion_form=args.diffusion_form,
-                        diffusion_norm=args.diffusion_norm,
-                        last_step=args.last_step,
-                        last_step_size=args.last_step_size,
-                        num_steps=num_sampling_steps,
-                    )
-                # end sampler
-
-                resolution = resolution.split(" ")[-1]
-                w, h = resolution.split("x")
-                w, h = int(w), int(h)
-                latent_w, latent_h = w // 8, h // 8
-                if int(seed) != 0:
-                    torch.random.manual_seed(int(seed))
-                z = torch.randn([1, 4, latent_h, latent_w], device="cuda").to(dtype)
-                z = z.repeat(2, 1, 1, 1)
-
-                with torch.no_grad():
-                    cap_feats, cap_mask = encode_prompt(
-                        [cap] + [""], text_encoder, tokenizer, 0.0
-                    )
-                cap_mask = cap_mask.to(cap_feats.device)
-
-                train_res = 1024
-                res_cat = (w * h) ** 0.5
-                print(f"res_cat: {res_cat}")
-                max_seq_len = (res_cat // 16) ** 2 + (res_cat // 16) * 2
-                print(f"max_seq_len: {max_seq_len}")
-
-                rope_scaling_factor = 1.0
-                ntk_factor = max_seq_len / (train_res // 16) ** 2
-                print(f"ntk_factor: {ntk_factor}")
-
-                model_kwargs = dict(
-                    cap_feats=cap_feats,
-                    cap_mask=cap_mask,
-                    cfg_scale=cfg_scale,
-                    rope_scaling_factor=rope_scaling_factor,
-                    ntk_factor=ntk_factor,
+            else:
+                sample_fn = sampler.sample_ode(
+                    sampling_method=solver,
+                    num_steps=num_sampling_steps,
+                    atol=args.atol,
+                    rtol=args.rtol,
+                    reverse=args.reverse,
+                    time_shifting_factor=t_shift,
                 )
+            # end sampler
 
-                if dist.get_rank() == 0:
-                    print(f"caption: {cap}")
-                    print(f"num_sampling_steps: {num_sampling_steps}")
-                    print(f"cfg_scale: {cfg_scale}")
+            resolution = resolution.split(" ")[-1]
+            w, h = resolution.split("x")
+            w, h = int(w), int(h)
+            latent_w, latent_h = w // 8, h // 8
+            if int(seed) != 0:
+                torch.random.manual_seed(int(seed))
+            z = torch.randn([1, 4, latent_h, latent_w], device="cuda").to(dtype)
+            z = z.repeat(2, 1, 1, 1)
 
-                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                    print("> [debug] start sample")
-                    samples = sample_fn(z, model.forward_with_cfg, **model_kwargs)[-1]
-                samples = samples[:1]
+            with torch.no_grad():
+                cap_feats, cap_mask = encode_prompt(
+                    [cap] + [""], text_encoder, tokenizer, 0.0
+                )
+            cap_mask = cap_mask.to(cap_feats.device)
 
-                factor = 0.18215 if train_args.vae != "sdxl" else 0.13025
-                print(f"vae factor: {factor}")
-                samples = vae.decode(samples / factor).sample
-                samples = (samples + 1.0) / 2.0
-                samples.clamp_(0.0, 1.0)
-                img = to_pil_image(samples[0].float())
+            train_res = 1024
+            res_cat = (w * h) ** 0.5
+            print(f"res_cat: {res_cat}")
+            max_seq_len = (res_cat // 16) ** 2 + (res_cat // 16) * 2
+            print(f"max_seq_len: {max_seq_len}")
 
-                if response_queue is not None:
-                    response_queue.put(img)
+            rope_scaling_factor = 1.0
+            ntk_factor = max_seq_len / (train_res // 16) ** 2
+            print(f"ntk_factor: {ntk_factor}")
 
-            except Exception:
-                print(traceback.format_exc())
-                response_queue.put(ModelFailure())
+            model_kwargs = dict(
+                cap_feats=cap_feats,
+                cap_mask=cap_mask,
+                cfg_scale=cfg_scale,
+                rope_scaling_factor=rope_scaling_factor,
+                ntk_factor=ntk_factor,
+            )
+
+            print(f"caption: {cap}")
+            print(f"num_sampling_steps: {num_sampling_steps}")
+            print(f"cfg_scale: {cfg_scale}")
+
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                print("> [debug] start sample")
+                samples = sample_fn(z, model.forward_with_cfg, **model_kwargs)[-1]
+            samples = samples[:1]
+
+            factor = 0.18215 if train_args.vae != "sdxl" else 0.13025
+            print(f"vae factor: {factor}")
+
+            samples = vae.decode(samples / factor).sample
+            samples = (samples + 1.0) / 2.0
+            samples.clamp_(0.0, 1.0)
+
+            img = to_pil_image(samples[0].float())
+
+            return img
+        except Exception:
+            print(traceback.format_exc())
+            return ModelFailure()
 
 
 def none_or_str(value):
@@ -412,7 +417,6 @@ def find_free_port() -> int:
     return port
 
 
-@spaces.GPU
 def main():
     parser = argparse.ArgumentParser()
     mode = "ODE"
@@ -423,13 +427,7 @@ def main():
     parser.add_argument("--precision", default="bf16", choices=["bf16", "fp32"])
 
     parse_transport_args(parser)
-    if mode == "ODE":
-        parse_ode_args(parser)
-        # Further processing for ODE
-    elif mode == "SDE":
-        parse_sde_args(parser)
-        # Further processing for SDE
-
+    parse_ode_args(parser)
     args = parser.parse_known_args()[0]
 
     if args.num_gpus != 1:
@@ -437,24 +435,7 @@ def main():
 
     args.sampler_mode = mode
 
-    master_port = find_free_port()
-
-    request_queues = []
-    response_queue = Queue()
-    # mp_barrier = mp.Barrier(args.num_gpus + 1)
-    # barrier = Barrier(args.num_gpus + 1)
-    for i in range(args.num_gpus):
-        request_queues.append(Queue())
-        generation_kwargs = dict(
-            args=args,
-            master_port=master_port,
-            rank=i,
-            request_queue=request_queues[i],
-            response_queue=response_queue if i == 0 else None,
-        )
-        model_main(**generation_kwargs)
-        # thread = Thread(target=model_main, kwargs=generation_kwargs)
-        # thread.start()
+    text_encoder, tokenizer, vae, model = load_models(args, 60001, 0)
 
     with gr.Blocks() as demo:
         with gr.Row():
@@ -482,6 +463,7 @@ def main():
                         minimum=1,
                         maximum=70,
                         value=30,
+                        step=1,
                         interactive=True,
                         label="Sampling steps",
                     )
@@ -537,12 +519,10 @@ def main():
                     #     ntk_scaling, proportional_attn
                     # ])
             with gr.Column():
-                # default_img = Image.open("./image.png")
                 output_img = gr.Image(
                     label="Generated image",
                     interactive=False,
                     format="png",
-                    # value=default_img,
                 )
 
         with gr.Row():
@@ -557,35 +537,60 @@ def main():
                     ["味噌ラーメン, 最高品質の浮世絵、江戸時代。"],
                     ["東京タワー、最高品質の浮世絵、江戸時代。"],
                     ["Astronaut on Mars During sunset"],
-                    ["Tour de Tokyo, estampes ukiyo-e de la plus haute qualité, période Edo"],
+                    [
+                        "Tour de Tokyo, estampes ukiyo-e de la plus haute qualité, période Edo"
+                    ],
                     ["🐔 playing 🏀"],
                     ["☃️ with 🌹 in the ❄️"],
                     ["🐶 wearing 😎  flying on 🌈 "],
                     ["A small 🍎 and 🍊 with 😁 emoji in the Sahara desert"],
                     ["Токийская башня, лучшие укиё-э, период Эдо"],
                     ["Tokio-Turm, hochwertigste Ukiyo-e, Edo-Zeit"],
-                    ["A scared cute rabbit in Happy Tree Friends style and punk vibe."],  # noqa
+                    [
+                        "A scared cute rabbit in Happy Tree Friends style and punk vibe."
+                    ],  # noqa
                     ["A humanoid eagle soldier of the First World War."],  # noqa
-                    ["A cute Christmas mockup on an old wooden industrial desk table with Christmas decorations and bokeh lights in the background."],
-                    ["A front view of a romantic flower shop in France filled with various blooming flowers including lavenders and roses."],
-                    ["An old man, portrayed as a retro superhero, stands in the streets of New York City at night"],
-                    ["many trees are surrounded by a lake in autumn colors, in the style of nature-inspired imagery, havencore, brightly colored, dark white and dark orange, bright primary colors, environmental activism, forestpunk --ar 64:51"],
-                    ["A fluffy mouse holding a watermelon, in a magical and colorful setting, illustrated in the style of Hayao Miyazaki anime by Studio Ghibli."],
-                    ["Inka warrior with a war make up, medium shot, natural light, Award winning wildlife photography, hyperrealistic, 8k resolution, --ar 9:16"],
-                    ["Character of lion in style of saiyan, mafia, gangsta, citylights background, Hyper detailed, hyper realistic, unreal engine ue5, cgi 3d, cinematic shot, 8k"],
-                    ["In the sky above, a giant, whimsical cloud shaped like the 😊 emoji casts a soft, golden light over the scene"],
-                    ["Cyberpunk eagle, neon ambiance, abstract black oil, gear mecha, detailed acrylic, grunge, intricate complexity, rendered in unreal engine 5, photorealistic, 8k"],
-                    ["close-up photo of a beautiful red rose breaking through a cube made of ice , splintered cracked ice surface, frosted colors, blood dripping from rose, melting ice, Valentine’s Day vibes, cinematic, sharp focus, intricate, cinematic, dramatic light"],
-                    ["3D cartoon Fox Head with Human Body, Wearing Iridescent Holographic Liquid Texture & Translucent Material Sun Protective Shirt, Boss Feel, Nike or Addidas Sun Protective Shirt, WitchPunk, Y2K Style, Green and blue, Blue, Metallic Feel, Strong Reflection, plain background, no background, pure single color background, Digital Fashion, Surreal Futurism, Supreme Kong NFT Artwork Style, disney style, headshot photography for portrait studio shoot, fashion editorial aesthetic, high resolution in the style of HAPE PRIME NFT, NFT 3D IP Feel, Bored Ape Yacht Club NFT project Feel, high detail, fine luster, 3D render, oc render, best quality, 8K, bright, front lighting, Face Shot, fine luster, ultra detailed"],
+                    [
+                        "A cute Christmas mockup on an old wooden industrial desk table with Christmas decorations and bokeh lights in the background."
+                    ],
+                    [
+                        "A front view of a romantic flower shop in France filled with various blooming flowers including lavenders and roses."
+                    ],
+                    [
+                        "An old man, portrayed as a retro superhero, stands in the streets of New York City at night"
+                    ],
+                    [
+                        "many trees are surrounded by a lake in autumn colors, in the style of nature-inspired imagery, havencore, brightly colored, dark white and dark orange, bright primary colors, environmental activism, forestpunk --ar 64:51"
+                    ],
+                    [
+                        "A fluffy mouse holding a watermelon, in a magical and colorful setting, illustrated in the style of Hayao Miyazaki anime by Studio Ghibli."
+                    ],
+                    [
+                        "Inka warrior with a war make up, medium shot, natural light, Award winning wildlife photography, hyperrealistic, 8k resolution, --ar 9:16"
+                    ],
+                    [
+                        "Character of lion in style of saiyan, mafia, gangsta, citylights background, Hyper detailed, hyper realistic, unreal engine ue5, cgi 3d, cinematic shot, 8k"
+                    ],
+                    [
+                        "In the sky above, a giant, whimsical cloud shaped like the 😊 emoji casts a soft, golden light over the scene"
+                    ],
+                    [
+                        "Cyberpunk eagle, neon ambiance, abstract black oil, gear mecha, detailed acrylic, grunge, intricate complexity, rendered in unreal engine 5, photorealistic, 8k"
+                    ],
+                    [
+                        "close-up photo of a beautiful red rose breaking through a cube made of ice , splintered cracked ice surface, frosted colors, blood dripping from rose, melting ice, Valentine’s Day vibes, cinematic, sharp focus, intricate, cinematic, dramatic light"
+                    ],
+                    [
+                        "3D cartoon Fox Head with Human Body, Wearing Iridescent Holographic Liquid Texture & Translucent Material Sun Protective Shirt, Boss Feel, Nike or Addidas Sun Protective Shirt, WitchPunk, Y2K Style, Green and blue, Blue, Metallic Feel, Strong Reflection, plain background, no background, pure single color background, Digital Fashion, Surreal Futurism, Supreme Kong NFT Artwork Style, disney style, headshot photography for portrait studio shoot, fashion editorial aesthetic, high resolution in the style of HAPE PRIME NFT, NFT 3D IP Feel, Bored Ape Yacht Club NFT project Feel, high detail, fine luster, 3D render, oc render, best quality, 8K, bright, front lighting, Face Shot, fine luster, ultra detailed"
+                    ],
                 ],
                 [cap],
                 label="Examples",
             )
 
-        def on_submit(*args):
-            for q in request_queues:
-                q.put(args)
-            result = response_queue.get()
+        @spaces.GPU(duration=240)
+        def on_submit(*infer_args):
+            result = infer_ode(args, infer_args, text_encoder, tokenizer, vae, model)
             if isinstance(result, ModelFailure):
                 raise RuntimeError("Model failed to generate the image.")
             return result
@@ -606,10 +611,8 @@ def main():
             [output_img],
         )
 
-    # barrier.wait()
     demo.queue(max_size=20).launch()
 
 
 if __name__ == "__main__":
-    # mp.set_start_method("spawn")
     main()
