@@ -44,8 +44,11 @@ print(f"CUDA device: {torch.cuda.get_device_name(torch.cuda.current_device())}")
 
 description = """
     # Lumina Next Text-to-Image
-    Lumina-Next-T2I is a 2B Next-DiT model with 2B text encoder.
-    Demo current model: `Lumina-Next-T2I`
+    
+    #### Lumina-Next-T2I is a 2B `Next-DiT` model with `Gemma-2B` text encoder.
+    
+    #### Demo current model: `Lumina-Next-T2I`
+ 
 """
 
 hf_token = os.environ["HF_TOKEN"]
@@ -184,10 +187,6 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
     os.environ["RANK"] = str(0)
     os.environ["WORLD_SIZE"] = str(args.num_gpus)
 
-    # dist.init_process_group("nccl")
-    # set up fairscale environment because some methods of the Lumina model need it,
-    # though for single-GPU inference fairscale actually has no effect
-    # fs_init.initialize_model_parallel(args.num_gpus)
     torch.cuda.set_device(0)
 
     # loading model to gpu
@@ -586,6 +585,7 @@ def main():
                 ],
                 [cap],
                 label="Examples",
+                examples_per_page=22,
             )
 
         @spaces.GPU(duration=240)
