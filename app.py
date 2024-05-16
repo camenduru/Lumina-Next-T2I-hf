@@ -7,9 +7,8 @@ subprocess.run(
     shell=True,
 )
 
-from huggingface_hub import snapshot_download
-
 os.makedirs("/home/user/app/checkpoints", exist_ok=True)
+from huggingface_hub import snapshot_download
 snapshot_download(
     repo_id="Alpha-VLLM/Lumina-Next-T2I", local_dir="/home/user/app/checkpoints"
 )
@@ -32,8 +31,7 @@ import torch.distributed as dist
 from torchvision.transforms.functional import to_pil_image
 
 from PIL import Image
-from queue import Queue
-from threading import Thread, Barrier
+from safetensors.torch import load_file
 
 import models
 
@@ -50,7 +48,6 @@ description = """
     #### Demo current model: `Lumina-Next-T2I`
  
 """
-
 hf_token = os.environ["HF_TOKEN"]
 
 
@@ -161,12 +158,11 @@ def load_models(args, master_port, rank):
     assert train_args.model_parallel_size == args.num_gpus
     if args.ema:
         print("Loading ema model.")
-    ckpt = torch.load(
+    ckpt = load_file(
         os.path.join(
             args.ckpt,
-            f"consolidated{'_ema' if args.ema else ''}.{rank:02d}-of-{args.num_gpus:02d}.pth",
+            f"consolidated{'_ema' if args.ema else ''}.{rank:02d}-of-{args.num_gpus:02d}.safetensors",
         ),
-        map_location="cpu",
     )
     model.load_state_dict(ckpt, strict=True)
 
@@ -179,17 +175,15 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
         args.precision
     ]
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
-
-    print(args)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.set_device(0)
-    
+
     # loading model to gpu
     # text_encoder = text_encoder.cuda()
     # vae = vae.cuda()
     # model = model.to("cuda", dtype=dtype)
 
-    with torch.autocast("cuda", dtype):
+    with torch.autocast(device, dtype):
         (
             cap,
             resolution,
@@ -202,18 +196,19 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             proportional_attn,
         ) = infer_args
 
-        print(
-            "> params:",
-            cap,
-            resolution,
-            num_sampling_steps,
-            cfg_scale,
-            solver,
-            t_shift,
-            seed,
-            ntk_scaling,
-            proportional_attn,
+        metadata = dict(
+            cap=cap,
+            resolution=resolution,
+            num_sampling_steps=num_sampling_steps,
+            cfg_scale=cfg_scale,
+            solver=solver,
+            t_shift=t_shift,
+            seed=seed,
+            ntk_scaling=ntk_scaling,
+            proportional_attn=proportional_attn,
         )
+        print("> params:", json.dumps(metadata, indent=2))
+        
         try:
             # begin sampler
             transport = create_transport(
@@ -249,7 +244,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             latent_w, latent_h = w // 8, h // 8
             if int(seed) != 0:
                 torch.random.manual_seed(int(seed))
-            z = torch.randn([1, 4, latent_h, latent_w], device="cuda").to(dtype)
+            z = torch.randn([1, 4, latent_h, latent_w], device=device).to(dtype)
             z = z.repeat(2, 1, 1, 1)
 
             with torch.no_grad():
@@ -276,13 +271,8 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
                 ntk_factor=ntk_factor,
             )
 
-            print(f"caption: {cap}")
-            print(f"num_sampling_steps: {num_sampling_steps}")
-            print(f"cfg_scale: {cfg_scale}")
-
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                print("> [debug] start sample")
-                samples = sample_fn(z, model.forward_with_cfg, **model_kwargs)[-1]
+            print("> start sample")
+            samples = sample_fn(z, model.forward_with_cfg, **model_kwargs)[-1]
             samples = samples[:1]
 
             factor = 0.18215 if train_args.vae != "sdxl" else 0.13025
@@ -294,7 +284,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
 
             img = to_pil_image(samples[0].float())
 
-            return img
+            return img, metadata
         except Exception:
             print(traceback.format_exc())
             return ModelFailure()
@@ -505,18 +495,15 @@ def main():
                         )
                 with gr.Row():
                     submit_btn = gr.Button("Submit", variant="primary")
-                    # reset_btn = gr.ClearButton([
-                    #     cap, resolution,
-                    #     num_sampling_steps, cfg_scale, solver,
-                    #     t_shift, seed,
-                    #     ntk_scaling, proportional_attn
-                    # ])
             with gr.Column():
                 output_img = gr.Image(
                     label="Lumina Generated image",
                     interactive=False,
                     format="png",
+                    show_label=False
                 )
+                with gr.Accordion(label="Generation Parameters", open=False):
+                    gr_metadata = gr.JSON(label="metadata", show_label=False)
 
         with gr.Row():
             gr.Examples(
@@ -582,8 +569,8 @@ def main():
                 examples_per_page=22,
             )
 
-        @spaces.GPU(duration=200)
-        def on_submit(*infer_args):
+        @spaces.GPU(duration=80)
+        def on_submit(*infer_args, progress=gr.Progress(track_tqdm=True),):
             result = infer_ode(args, infer_args, text_encoder, tokenizer, vae, model)
             if isinstance(result, ModelFailure):
                 raise RuntimeError("Model failed to generate the image.")
@@ -602,10 +589,10 @@ def main():
                 ntk_scaling,
                 proportional_attn,
             ],
-            [output_img],
+            [output_img, gr_metadata],
         )
 
-    demo.queue(max_size=20).launch()
+    demo.queue().launch()
 
 
 if __name__ == "__main__":
