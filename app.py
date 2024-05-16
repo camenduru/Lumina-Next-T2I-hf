@@ -117,13 +117,14 @@ def load_models(args, master_port, rank):
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
         args.precision
     ]
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     print(f"Creating lm: Gemma-2B")
     text_encoder = (
         AutoModelForCausalLM.from_pretrained(
             "google/gemma-2b",
             torch_dtype=dtype,
-            device_map="cpu",
+            device_map=device,
             # device_map="cuda",
             token=hf_token,
         )
@@ -146,7 +147,7 @@ def load_models(args, master_port, rank):
     vae = AutoencoderKL.from_pretrained(
         "stabilityai/sdxl-vae",
         torch_dtype=torch.float32,
-    )
+    ).to(device)
 
     print(f"Creating DiT: Next-DiT")
     # latent_size = train_args.image_size // 8
@@ -155,7 +156,7 @@ def load_models(args, master_port, rank):
         cap_feat_dim=cap_feat_dim,
     )
     # model.eval().to("cuda", dtype=dtype)
-    model.eval()
+    model.eval().to(device, dtype=dtype)
 
     assert train_args.model_parallel_size == args.num_gpus
     if args.ema:
@@ -169,7 +170,6 @@ def load_models(args, master_port, rank):
     )
     model.load_state_dict(ckpt, strict=True)
 
-    # barrier.wait()
     return text_encoder, tokenizer, vae, model
 
 
@@ -181,12 +181,13 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
 
     print(args)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.cuda.set_device(0)
-
+    
     # loading model to gpu
-    text_encoder = text_encoder.cuda()
-    vae = vae.cuda()
-    model = model.to("cuda", dtype=dtype)
+    # text_encoder = text_encoder.cuda()
+    # vae = vae.cuda()
+    # model = model.to("cuda", dtype=dtype)
 
     with torch.autocast("cuda", dtype):
         (
@@ -581,7 +582,7 @@ def main():
                 examples_per_page=22,
             )
 
-        @spaces.GPU(duration=240)
+        @spaces.GPU(duration=200)
         def on_submit(*infer_args):
             result = infer_ode(args, infer_args, text_encoder, tokenizer, vae, model)
             if isinstance(result, ModelFailure):
