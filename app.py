@@ -513,7 +513,7 @@ def main():
                     # ])
             with gr.Column():
                 output_img = gr.Image(
-                    label="Generated image",
+                    label="Lumina Generated image",
                     interactive=False,
                     format="png",
                 )
