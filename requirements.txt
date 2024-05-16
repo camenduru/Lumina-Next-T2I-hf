@@ -1,7 +1,7 @@
 --index-url https://download.pytorch.org/whl/cu118
-torch==2.0.1
-torchvision==0.15.2
-torchaudio==2.0.2
+torch==2.2.0
+torchvision==0.17.0
+torchaudio==2.2.0
 --index-url https://pypi.org/simple 
 transformers==4.40.2
 diffusers==0.26.3
