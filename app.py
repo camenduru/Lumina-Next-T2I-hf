@@ -502,7 +502,7 @@ def main():
                     format="png",
                     show_label=False
                 )
-                with gr.Accordion(label="Generation Parameters", open=False):
+                with gr.Accordion(label="Generation Parameters", open=True):
                     gr_metadata = gr.JSON(label="metadata", show_label=False)
 
         with gr.Row():
