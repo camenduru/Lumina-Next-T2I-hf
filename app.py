@@ -569,7 +569,7 @@ def main():
                 examples_per_page=22,
             )
 
-        @spaces.GPU(duration=80)
+        @spaces.GPU(duration=120)
         def on_submit(*infer_args, progress=gr.Progress(track_tqdm=True),):
             result = infer_ode(args, infer_args, text_encoder, tokenizer, vae, model)
             if isinstance(result, ModelFailure):
