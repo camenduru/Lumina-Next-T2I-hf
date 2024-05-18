@@ -430,7 +430,7 @@ def main():
                     label="Caption",
                     interactive=True,
                     value="Miss Mexico portrait of the most beautiful mexican woman, Exquisite detail, 30-megapixel, 4k, 85-mm-lens, sharp-focus, f:8, "
-                    "ISO 100, shutter-speed 1:125, diffuse-back-lighting, award-winning photograph, small-catchlight, High-sharpness, facial-symmetry, 8k --q 2 --ar 18:32 --v 5",
+                    "ISO 100, shutter-speed 1:125, diffuse-back-lighting, award-winning photograph, small-catchlight, High-sharpness, facial-symmetry, 8k",
                 )
                 with gr.Row():
                     res_choices = ["1024x1024", "512x2048", "2048x512"] + [
@@ -528,7 +528,7 @@ def main():
                         "An old man, portrayed as a retro superhero, stands in the streets of New York City at night"
                     ],
                     [
-                        "many trees are surrounded by a lake in autumn colors, in the style of nature-inspired imagery, havencore, brightly colored, dark white and dark orange, bright primary colors, environmental activism, forestpunk --ar 64:51"
+                        "many trees are surrounded by a lake in autumn colors, in the style of nature-inspired imagery, havencore, brightly colored, dark white and dark orange, bright primary colors, environmental activism, forestpunk"
                     ],
                     [
                         "A fluffy mouse holding a watermelon, in a magical and colorful setting, illustrated in the style of Hayao Miyazaki anime by Studio Ghibli."
@@ -546,7 +546,7 @@ def main():
                     ["Токийская башня, лучшие укиё-э, период Эдо"],
                     ["Tokio-Turm, hochwertigste Ukiyo-e, Edo-Zeit"],
                     [
-                        "Inka warrior with a war make up, medium shot, natural light, Award winning wildlife photography, hyperrealistic, 8k resolution, --ar 9:16"
+                        "Inka warrior with a war make up, medium shot, natural light, Award winning wildlife photography, hyperrealistic, 8k resolution"
                     ],
                     [
                         "Character of lion in style of saiyan, mafia, gangsta, citylights background, Hyper detailed, hyper realistic, unreal engine ue5, cgi 3d, cinematic shot, 8k"
