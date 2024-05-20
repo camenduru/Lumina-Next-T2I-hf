@@ -463,8 +463,8 @@ def main():
                 ):
                     with gr.Row():
                         solver = gr.Dropdown(
-                            value="euler",
-                            choices=["euler", "dopri5", "dopri8"],
+                            value="midpoint",
+                            choices=["euler", "midpoint", "rk4"],
                             label="solver",
                         )
                         t_shift = gr.Slider(
