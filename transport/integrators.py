@@ -99,10 +99,12 @@ class ode:
 
         self.drift = drift
         self.t = th.linspace(t0, t1, num_steps)
-        if time_shifting_factor:
-            self.t = self.t / (
-                self.t + time_shifting_factor - time_shifting_factor * self.t
-            )
+        if time_shifting_factor == 0:
+            t_1 = 1 / (1 + th.exp(-6 * (self.t - 0.6)))
+            t_2 = 1 - 1 / (1 + th.exp(20 * (self.t - 0.6)))
+            self.t = th.where(self.t < 0.6, t_1, t_2)
+        else:
+            self.t = self.t / (self.t + time_shifting_factor - time_shifting_factor * self.t)
         self.atol = atol
         self.rtol = rtol
         self.sampler_type = sampler_type
