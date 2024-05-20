@@ -34,8 +34,7 @@ from PIL import Image
 from safetensors.torch import load_file
 
 import models
-
-from lumina_t2i.transport import create_transport, Sampler
+from transport import create_transport, Sampler
 
 print(f"Is CUDA available: {torch.cuda.is_available()}")
 print(f"CUDA device: {torch.cuda.get_device_name(torch.cuda.current_device())}")
@@ -46,6 +45,8 @@ description = """
     #### Lumina-Next-T2I is a 2B `Next-DiT` model with `Gemma-2B` text encoder.
     
     #### Demo current model: `Lumina-Next-T2I`
+
+    #### Lumina-Next supports higher-order solvers. <span style='color: orange;'>It can generate images with merely 10 steps without any distillation.
  
 """
 hf_token = os.environ["HF_TOKEN"]
@@ -445,7 +446,7 @@ def main():
                     num_sampling_steps = gr.Slider(
                         minimum=1,
                         maximum=70,
-                        value=30,
+                        value=10,
                         step=1,
                         interactive=True,
                         label="Sampling steps",
