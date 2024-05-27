@@ -261,8 +261,8 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
                         tokenizer,
                         0.0,
                     )
-                    cap_feats = torch.cat([neg_cap_feats, cap_feats], dim=0)
-                    cap_mask = torch.cat([neg_cap_mask, cap_mask], dim=0)
+                    cap_feats = torch.cat([neg_cap_feats, cap_feats], dim=1)
+                    cap_mask = torch.cat([neg_cap_mask, cap_mask], dim=1)
 
             cap_mask = cap_mask.to(cap_feats.device)
 
