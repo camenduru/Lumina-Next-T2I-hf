@@ -187,6 +187,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
     with torch.autocast("cuda", dtype):
         (
             cap,
+            neg_cap,
             resolution,
             num_sampling_steps,
             cfg_scale,
@@ -199,6 +200,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
 
         metadata = dict(
             cap=cap,
+            neg_cap=neg_cap,
             resolution=resolution,
             num_sampling_steps=num_sampling_steps,
             cfg_scale=cfg_scale,
@@ -252,6 +254,16 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
                 cap_feats, cap_mask = encode_prompt(
                     [cap] + [""], text_encoder, tokenizer, 0.0
                 )
+                if neg_cap != "":
+                    neg_cap_feats, neg_cap_mask = encode_prompt(
+                        [neg_cap] + [""],
+                        text_encoder,
+                        tokenizer,
+                        0.0,
+                    )
+                    cap_feats = torch.cat([neg_cap_feats, cap_feats], dim=0)
+                    cap_mask = torch.cat([neg_cap_mask, cap_mask], dim=0)
+
             cap_mask = cap_mask.to(cap_feats.device)
 
             train_res = 1024
@@ -432,6 +444,14 @@ def main():
                     interactive=True,
                     value="Miss Mexico portrait of the most beautiful mexican woman, Exquisite detail, 30-megapixel, 4k, 85-mm-lens, sharp-focus, f:8, "
                     "ISO 100, shutter-speed 1:125, diffuse-back-lighting, award-winning photograph, small-catchlight, High-sharpness, facial-symmetry, 8k",
+                    placeholder="Enter a caption.",
+                )
+                neg_cap = gr.Textbox(
+                    lines=2,
+                    label="Negative Caption",
+                    interactive=True,
+                    value="",
+                    placeholder="Enter a negative caption.",
                 )
                 with gr.Row():
                     res_choices = ["1024x1024", "512x2048", "2048x512"] + [
@@ -581,6 +601,7 @@ def main():
             on_submit,
             [
                 cap,
+                neg_cap,
                 resolution,
                 num_sampling_steps,
                 cfg_scale,
