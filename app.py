@@ -458,9 +458,12 @@ def main():
                 )
                 with gr.Row():
                     res_choices = ["1024x1024", "512x2048", "2048x512"] + [
+                        "(Extrapolation) 2048x1920",
+                        "(Extrapolation) 1920x2048",
                         "(Extrapolation) 1664x1664",
-                        "(Extrapolation) 1024x2048",
+                        "(Extrapolation) 1536x2560",
                         "(Extrapolation) 2048x1024",
+                        "(Extrapolation) 1024x2048",
                     ]
                     resolution = gr.Dropdown(
                         value=res_choices[0], choices=res_choices, label="Resolution"
