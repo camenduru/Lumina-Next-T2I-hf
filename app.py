@@ -194,7 +194,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             solver,
             t_shift,
             seed,
-            ntk_scaling,
+            scale_method,
             proportional_attn,
         ) = infer_args
 
@@ -207,7 +207,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             solver=solver,
             t_shift=t_shift,
             seed=seed,
-            ntk_scaling=ntk_scaling,
+            ntk_scaling=scale_method,
             proportional_attn=proportional_attn,
         )
         print("> params:", json.dumps(metadata, indent=2))
@@ -244,6 +244,19 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             resolution = resolution.split(" ")[-1]
             w, h = resolution.split("x")
             w, h = int(w), int(h)
+
+            res_cat = (w * h) ** 0.5
+            seq_len = res_cat // 16
+
+            scaling_method = "ntk"
+            train_seq_len = 64
+            if scaling_method == "ntk":
+                scale_factor = seq_len / train_seq_len
+            else:
+                raise NotImplementedError
+
+            print(f"> scale factor: {scale_factor}")
+
             latent_w, latent_h = w // 8, h // 8
             if int(seed) != 0:
                 torch.random.manual_seed(int(seed))
@@ -251,37 +264,27 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             z = z.repeat(2, 1, 1, 1)
 
             with torch.no_grad():
-                cap_feats, cap_mask = encode_prompt(
-                    [cap] + [""], text_encoder, tokenizer, 0.0
-                )
                 if neg_cap != "":
-                    neg_cap_feats, neg_cap_mask = encode_prompt(
-                        [neg_cap] + [""],
+                    cap_feats, cap_mask = encode_prompt(
+                        [cap] + [neg_cap],
                         text_encoder,
                         tokenizer,
                         0.0,
                     )
-                    cap_feats = torch.cat([neg_cap_feats, cap_feats], dim=1)
-                    cap_mask = torch.cat([neg_cap_mask, cap_mask], dim=1)
-
+                else:
+                    cap_feats, cap_mask = encode_prompt(
+                        [cap] + [""],
+                        text_encoder,
+                        tokenizer,
+                        0.0,
+                    )
             cap_mask = cap_mask.to(cap_feats.device)
-
-            train_res = 1024
-            res_cat = (w * h) ** 0.5
-            print(f"res_cat: {res_cat}")
-            max_seq_len = (res_cat // 16) ** 2 + (res_cat // 16) * 2
-            print(f"max_seq_len: {max_seq_len}")
-
-            rope_scaling_factor = 1.0
-            ntk_factor = max_seq_len / (train_res // 16) ** 2
-            print(f"ntk_factor: {ntk_factor}")
 
             model_kwargs = dict(
                 cap_feats=cap_feats,
                 cap_mask=cap_mask,
                 cfg_scale=cfg_scale,
-                rope_scaling_factor=rope_scaling_factor,
-                ntk_factor=ntk_factor,
+                scale_factor=scale_factor,
             )
 
             print("> start sample")
@@ -504,10 +507,10 @@ def main():
                             label="CFG scale",
                         )
                     with gr.Row():
-                        ntk_scaling = gr.Checkbox(
-                            value=True,
-                            interactive=True,
-                            label="ntk scaling",
+                        scale_methods = gr.Dropdown(
+                            value="ntk",
+                            choices=["ntk"],
+                            label="Scale methods",
                         )
                         proportional_attn = gr.Checkbox(
                             value=True,
@@ -608,7 +611,7 @@ def main():
                 solver,
                 t_shift,
                 seed,
-                ntk_scaling,
+                scale_methods,
                 proportional_attn,
             ],
             [output_img, gr_metadata],
