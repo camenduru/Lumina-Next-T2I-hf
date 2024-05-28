@@ -665,7 +665,7 @@ class NextDiT(nn.Module):
         qk_norm: bool = False,
         cap_feat_dim: int = 5120,
         rope_scaling_factor: float = 1.0,
-        ntk_factor: float = 1.0,
+        scale_factor: float = 1.0,
     ) -> None:
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -715,10 +715,10 @@ class NextDiT(nn.Module):
             dim // n_heads,
             384,
             rope_scaling_factor=rope_scaling_factor,
-            ntk_factor=ntk_factor,
+            scale_factor=scale_factor,
         )
         self.rope_scaling_factor = rope_scaling_factor
-        self.ntk_factor = ntk_factor
+        self.scale_factor = scale_factor
         # self.eol_token = nn.Parameter(torch.empty(dim))
         self.pad_token = nn.Parameter(torch.empty(dim))
         # nn.init.normal_(self.eol_token, std=0.02)
@@ -875,7 +875,7 @@ class NextDiT(nn.Module):
         cap_mask,
         cfg_scale,
         rope_scaling_factor=None,
-        ntk_factor=None,
+        scale_factor=None,
         base_seqlen: Optional[int] = None,
         proportional_attn: bool = False,
     ):
