@@ -241,21 +241,11 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
                 )
             # end sampler
 
+            do_extrapolation = "Extrapolation" in resolution
             resolution = resolution.split(" ")[-1]
             w, h = resolution.split("x")
             w, h = int(w), int(h)
 
-            res_cat = (w * h) ** 0.5
-            seq_len = res_cat // 16
-
-            scaling_method = "ntk"
-            train_seq_len = 64
-            if scaling_method == "ntk":
-                scale_factor = seq_len / train_seq_len
-            else:
-                raise NotImplementedError
-
-            print(f"> scale factor: {scale_factor}")
 
             latent_w, latent_h = w // 8, h // 8
             if int(seed) != 0:
@@ -284,8 +274,17 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
                 cap_feats=cap_feats,
                 cap_mask=cap_mask,
                 cfg_scale=cfg_scale,
-                scale_factor=scale_factor,
             )
+
+            if proportional_attn:
+                model_kwargs["proportional_attn"] = True
+                model_kwargs["base_seqlen"] = (train_args.image_size // 16) ** 2
+            if do_extrapolation and scaling_method == "Time-aware":
+                model_kwargs["scale_factor"] = math.sqrt(w * h / train_args.image_size ** 2)
+            else:
+                model_kwargs["scale_factor"] = 1.0
+
+            print(f"> scale factor: {model_kwargs["scale_factor"]}")
 
             print("> start sample")
             samples = sample_fn(z, model.forward_with_cfg, **model_kwargs)[-1]
@@ -511,9 +510,9 @@ def main():
                         )
                     with gr.Row():
                         scale_methods = gr.Dropdown(
-                            value="ntk",
-                            choices=["ntk"],
-                            label="Scale methods",
+                            value="Time-aware",
+                            choices=["Time-aware", "None"],
+                            label="Rope scaling method",
                         )
                         proportional_attn = gr.Checkbox(
                             value=True,
