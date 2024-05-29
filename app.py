@@ -149,7 +149,7 @@ def load_models(args, master_port, rank):
 
     print(f"Creating DiT: Next-DiT")
     # latent_size = train_args.image_size // 8
-    model = models.__dict__["NextDiT_2B_patch2"](
+    model = models.__dict__["NextDiT_2B_GQA_patch2"](
         qk_norm=train_args.qk_norm,
         cap_feat_dim=cap_feat_dim,
     )
