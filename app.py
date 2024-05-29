@@ -284,7 +284,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             else:
                 model_kwargs["scale_factor"] = 1.0
 
-            print(f"> scale factor: {model_kwargs["scale_factor"]}")
+            print(f"> scale factor: {model_kwargs['scale_factor']}")
 
             print("> start sample")
             samples = sample_fn(z, model.forward_with_cfg, **model_kwargs)[-1]
