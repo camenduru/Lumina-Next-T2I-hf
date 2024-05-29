@@ -862,7 +862,7 @@ class NextDiT(nn.Module):
                 x, _ = x.chunk(2, dim=1)
             else:
                 x = [_.chunk(2, dim=0)[0] for _ in x]
-        return x`
+        return x
 
     def forward_with_cfg(
         self,
