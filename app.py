@@ -509,7 +509,7 @@ def main():
                             label="CFG scale",
                         )
                     with gr.Row():
-                        scale_methods = gr.Dropdown(
+                        scaling_method = gr.Dropdown(
                             value="Time-aware",
                             choices=["Time-aware", "None"],
                             label="Rope scaling method",
@@ -630,7 +630,7 @@ def main():
                 solver,
                 t_shift,
                 seed,
-                scale_methods,
+                scaling_method,
                 proportional_attn,
             ],
             [output_img, gr_metadata],
