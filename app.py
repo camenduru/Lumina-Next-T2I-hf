@@ -620,7 +620,6 @@ def main():
             ],
             [output_img, gr_metadata],
         )
-        stop_btn.click(fn=None, inputs=None, outputs=None, cancels=[submit_event])
 
     demo.queue().launch()
 
