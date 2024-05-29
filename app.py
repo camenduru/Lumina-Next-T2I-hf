@@ -194,7 +194,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             solver,
             t_shift,
             seed,
-            scale_method,
+            scaling_method,
             proportional_attn,
         ) = infer_args
 
@@ -207,7 +207,7 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
             solver=solver,
             t_shift=t_shift,
             seed=seed,
-            ntk_scaling=scale_method,
+            scaling_method=scaling_method,
             proportional_attn=proportional_attn,
         )
         print("> params:", json.dumps(metadata, indent=2))
@@ -521,6 +521,23 @@ def main():
                         )
                 with gr.Row():
                     submit_btn = gr.Button("Submit", variant="primary")
+                    reset_btn = gr.ClearButton(
+                        [
+                            cap,
+                            neg_cap,
+                            resolution,
+                            num_sampling_steps,
+                            cfg_scale,
+                            solver,
+                            t_shift,
+                            seed,
+                            scaling_method,
+                            proportional_attn,
+                        ],
+                        value="Cancel",
+                        variant="stop",
+                        
+                    )
             with gr.Column():
                 output_img = gr.Image(
                     label="Lumina Generated image",
