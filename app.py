@@ -522,23 +522,7 @@ def main():
                         )
                 with gr.Row():
                     submit_btn = gr.Button("Submit", variant="primary")
-                    reset_btn = gr.ClearButton(
-                        [
-                            cap,
-                            neg_cap,
-                            resolution,
-                            num_sampling_steps,
-                            cfg_scale,
-                            solver,
-                            t_shift,
-                            seed,
-                            scaling_method,
-                            proportional_attn,
-                        ],
-                        value="Cancel",
-                        variant="stop",
-                        
-                    )
+                    stop_btn = gr.Button("Stop", variant="stop")
             with gr.Column():
                 output_img = gr.Image(
                     label="Lumina Generated image",
@@ -618,9 +602,9 @@ def main():
             result = infer_ode(args, infer_args, text_encoder, tokenizer, vae, model)
             if isinstance(result, ModelFailure):
                 raise RuntimeError("Model failed to generate the image.")
-            return result
+            return result            
 
-        submit_btn.click(
+        submit_event = submit_btn.click(
             on_submit,
             [
                 cap,
@@ -636,6 +620,7 @@ def main():
             ],
             [output_img, gr_metadata],
         )
+        stop_btn.click(fn=None, inputs=None, outputs=None, cancels=[submit_event])
 
     demo.queue().launch()
 
