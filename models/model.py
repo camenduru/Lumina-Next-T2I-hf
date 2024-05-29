@@ -543,7 +543,7 @@ class TransformerBlock(nn.Module):
             nn.SiLU(),
             nn.Linear(
                 min(dim, 1024),
-                2 * dim,
+                4 * dim,
                 bias=True,
             ),
         )
