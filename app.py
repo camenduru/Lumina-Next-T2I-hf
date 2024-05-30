@@ -522,7 +522,6 @@ def main():
                         )
                 with gr.Row():
                     submit_btn = gr.Button("Submit", variant="primary")
-                    stop_btn = gr.Button("Stop", variant="stop")
             with gr.Column():
                 output_img = gr.Image(
                     label="Lumina Generated image",
@@ -604,7 +603,7 @@ def main():
                 raise RuntimeError("Model failed to generate the image.")
             return result            
 
-        submit_event = submit_btn.click(
+        submit_btn.click(
             on_submit,
             [
                 cap,
