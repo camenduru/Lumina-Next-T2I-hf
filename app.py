@@ -366,7 +366,7 @@ def main():
                     lines=2,
                     label="Negative Caption",
                     interactive=True,
-                    value="",
+                    value="low resolution, low quality, blurry",
                     placeholder="Enter a negative caption.",
                 )
                 with gr.Row():
