@@ -13,44 +13,29 @@ snapshot_download(
     repo_id="Alpha-VLLM/Lumina-Next-T2I", local_dir="/home/user/app/checkpoints"
 )
 
+hf_token = os.environ["HF_TOKEN"]
+
 import argparse
 import builtins
 import json
 import math
+import multiprocessing as mp
+import os
 import random
 import socket
-
-import spaces
 import traceback
 
-import fairscale.nn.model_parallel.initialize as fs_init
+from PIL import Image
+import spaces
 import gradio as gr
 import numpy as np
-
+from safetensors.torch import load_file
 import torch
 import torch.distributed as dist
 from torchvision.transforms.functional import to_pil_image
 
-from PIL import Image
-from safetensors.torch import load_file
-
 import models
-from transport import create_transport, Sampler
-
-print(f"Is CUDA available: {torch.cuda.is_available()}")
-print(f"CUDA device: {torch.cuda.get_device_name(torch.cuda.current_device())}")
-
-description = """
-    # Lumina Next Text-to-Image
-    
-    #### Lumina-Next-T2I is a 2B `Next-DiT` model with `Gemma-2B` text encoder.
-    
-    #### Demo current model: `Lumina-Next-T2I`
-
-    #### Lumina-Next supports higher-order solvers. <span style='color: orange;'>It can generate images with merely 10 steps without any distillation.
- 
-"""
-hf_token = os.environ["HF_TOKEN"]
+from transport import Sampler, create_transport
 
 
 class ModelFailure:
@@ -58,10 +43,7 @@ class ModelFailure:
 
 
 # Adapted from pipelines.StableDiffusionXLPipeline.encode_prompt
-def encode_prompt(
-    prompt_batch, text_encoder, tokenizer, proportion_empty_prompts, is_train=True
-):
-
+def encode_prompt(prompt_batch, text_encoder, tokenizer, proportion_empty_prompts, is_train=True):
     captions = []
     for caption in prompt_batch:
         if random.random() < proportion_empty_prompts:
@@ -94,10 +76,11 @@ def encode_prompt(
     return prompt_embeds, prompt_masks
 
 
+@torch.no_grad()
 def load_models(args, master_port, rank):
     # import here to avoid huggingface Tokenizer parallelism warnings
     from diffusers.models import AutoencoderKL
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModel, AutoTokenizer
 
     # override the default print function since the delay can be large for child process
     original_print = builtins.print
@@ -111,65 +94,46 @@ def load_models(args, master_port, rank):
     builtins.print = print
 
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
-    print("Loaded model arguments:", json.dumps(train_args.__dict__, indent=2))
-
-    dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[
-        args.precision
-    ]
+    dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[args.precision]
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    print(f"Creating lm: Gemma-2B")
-    text_encoder = (
-        AutoModelForCausalLM.from_pretrained(
-            "google/gemma-2b",
-            torch_dtype=dtype,
-            device_map=device,
-            # device_map="cuda",
-            token=hf_token,
-        )
-        .get_decoder()
-        .eval()
-    )
-    cap_feat_dim = text_encoder.config.hidden_size
-    if args.num_gpus > 1:
-        raise NotImplementedError("Inference with >1 GPUs not yet supported")
+    print("Loaded model arguments:", json.dumps(train_args.__dict__, indent=2))
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        "google/gemma-2b",
-        add_bos_token=True,
-        add_eos_token=True,
-        token=hf_token,
-    )
+    print(f"Creating lm: Gemma-2B")
+    text_encoder = AutoModel.from_pretrained(
+        "google/gemma-2b", torch_dtype=dtype, device_map=device, token=hf_token
+    ).eval()
+    cap_feat_dim = text_encoder.config.hidden_size
+
+    tokenizer = AutoTokenizer.from_pretrained("google/gemma-2b", token=hf_token)
     tokenizer.padding_side = "right"
 
-    print(f"Creating vae: sdxl-vae")
-    vae = AutoencoderKL.from_pretrained(
-        "stabilityai/sdxl-vae",
-        torch_dtype=torch.float32,
-    ).to(device)
 
-    print(f"Creating DiT: Next-DiT")
+    print(f"Creating vae: {train_args.vae}")
+    vae = AutoencoderKL.from_pretrained(
+        (f"stabilityai/sd-vae-ft-{train_args.vae}" if train_args.vae != "sdxl" else "stabilityai/sdxl-vae"),
+        torch_dtype=torch.float32,
+    ).cuda()
+
+    print(f"Creating Next-DiT: {train_args.model}")
     # latent_size = train_args.image_size // 8
-    model = models.__dict__["NextDiT_2B_GQA_patch2"](
+    model = models.__dict__[train_args.model](
         qk_norm=train_args.qk_norm,
         cap_feat_dim=cap_feat_dim,
     )
-    # model.eval().to("cuda", dtype=dtype)
     model.eval().to(device, dtype=dtype)
 
-    assert train_args.model_parallel_size == args.num_gpus
     if args.ema:
         print("Loading ema model.")
     ckpt = load_file(
         os.path.join(
             args.ckpt,
             f"consolidated{'_ema' if args.ema else ''}.{rank:02d}-of-{args.num_gpus:02d}.safetensors",
-        ),
+        )
     )
     model.load_state_dict(ckpt, strict=True)
-
+    
     return text_encoder, tokenizer, vae, model
-
 
 @torch.no_grad()
 def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
@@ -177,61 +141,49 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
         args.precision
     ]
     train_args = torch.load(os.path.join(args.ckpt, "model_args.pth"))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.set_device(0)
-
-    # loading model to gpu
-    # text_encoder = text_encoder.cuda()
-    # vae = vae.cuda()
-    # model = model.to("cuda", dtype=dtype)
-
+    
     with torch.autocast("cuda", dtype):
-        (
-            cap,
-            neg_cap,
-            resolution,
-            num_sampling_steps,
-            cfg_scale,
-            solver,
-            t_shift,
-            seed,
-            scaling_method,
-            proportional_attn,
-        ) = infer_args
+        while True:
+            (
+                cap,
+                neg_cap,
+                resolution,
+                num_sampling_steps,
+                cfg_scale,
+                solver,
+                t_shift,
+                seed,
+                scaling_method,
+                scaling_watershed,
+                proportional_attn,
+            ) = infer_args
 
-        metadata = dict(
-            cap=cap,
-            neg_cap=neg_cap,
-            resolution=resolution,
-            num_sampling_steps=num_sampling_steps,
-            cfg_scale=cfg_scale,
-            solver=solver,
-            t_shift=t_shift,
-            seed=seed,
-            scaling_method=scaling_method,
-            proportional_attn=proportional_attn,
-        )
-        print("> params:", json.dumps(metadata, indent=2))
-        
-        try:
-            # begin sampler
-            transport = create_transport(
-                args.path_type,
-                args.prediction,
-                args.loss_weight,
-                args.train_eps,
-                args.sample_eps,
+            metadata = dict(
+                cap=cap,
+                neg_cap=neg_cap,
+                resolution=resolution,
+                num_sampling_steps=num_sampling_steps,
+                cfg_scale=cfg_scale,
+                solver=solver,
+                t_shift=t_shift,
+                seed=seed,
+                scaling_method=scaling_method,
+                scaling_watershed=scaling_watershed,
+                proportional_attn=proportional_attn,
             )
-            sampler = Sampler(transport)
-            if args.likelihood:
-                # assert args.cfg_scale == 1, "Likelihood is incompatible with guidance"  # todo
-                sample_fn = sampler.sample_ode_likelihood(
-                    sampling_method=solver,
-                    num_steps=num_sampling_steps,
-                    atol=args.atol,
-                    rtol=args.rtol,
+            print("> params:", json.dumps(metadata, indent=2))
+
+            try:
+                # begin sampler
+                transport = create_transport(
+                    args.path_type,
+                    args.prediction,
+                    args.loss_weight,
+                    args.train_eps,
+                    args.sample_eps,
                 )
-            else:
+                sampler = Sampler(transport)
                 sample_fn = sampler.sample_ode(
                     sampling_method=solver,
                     num_steps=num_sampling_steps,
@@ -240,70 +192,67 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
                     reverse=args.reverse,
                     time_shifting_factor=t_shift,
                 )
-            # end sampler
+                # end sampler
 
-            do_extrapolation = "Extrapolation" in resolution
-            resolution = resolution.split(" ")[-1]
-            w, h = resolution.split("x")
-            w, h = int(w), int(h)
+                do_extrapolation = "Extrapolation" in resolution
+                resolution = resolution.split(" ")[-1]
+                w, h = resolution.split("x")
+                w, h = int(w), int(h)
+                latent_w, latent_h = w // 8, h // 8
+                if int(seed) != 0:
+                    torch.random.manual_seed(int(seed))
+                z = torch.randn([1, 4, latent_h, latent_w], device="cuda").to(dtype)
+                z = z.repeat(2, 1, 1, 1)
 
+                with torch.no_grad():
+                    if neg_cap != "":
+                        cap_feats, cap_mask = encode_prompt([cap] + [neg_cap], text_encoder, tokenizer, 0.0)
+                    else:
+                        cap_feats, cap_mask = encode_prompt([cap] + [""], text_encoder, tokenizer, 0.0)
 
-            latent_w, latent_h = w // 8, h // 8
-            if int(seed) != 0:
-                torch.random.manual_seed(int(seed))
-            z = torch.randn([1, 4, latent_h, latent_w], device="cuda").to(dtype)
-            z = z.repeat(2, 1, 1, 1)
+                cap_mask = cap_mask.to(cap_feats.device)
 
-            with torch.no_grad():
-                if neg_cap != "":
-                    cap_feats, cap_mask = encode_prompt(
-                        [cap] + [neg_cap],
-                        text_encoder,
-                        tokenizer,
-                        0.0,
-                    )
+                model_kwargs = dict(
+                    cap_feats=cap_feats,
+                    cap_mask=cap_mask,
+                    cfg_scale=cfg_scale,
+                )
+                if proportional_attn:
+                    model_kwargs["proportional_attn"] = True
+                    model_kwargs["base_seqlen"] = (train_args.image_size // 16) ** 2
                 else:
-                    cap_feats, cap_mask = encode_prompt(
-                        [cap] + [""],
-                        text_encoder,
-                        tokenizer,
-                        0.0,
-                    )
-            cap_mask = cap_mask.to(cap_feats.device)
+                    model_kwargs["proportional_attn"] = False
+                    model_kwargs["base_seqlen"] = None
 
-            model_kwargs = dict(
-                cap_feats=cap_feats,
-                cap_mask=cap_mask,
-                cfg_scale=cfg_scale,
-            )
+                if do_extrapolation and scaling_method == "Time-aware":
+                    model_kwargs["scale_factor"] = math.sqrt(w * h / train_args.image_size**2)
+                    model_kwargs["scale_watershed"] = scaling_watershed
+                else:
+                    model_kwargs["scale_factor"] = 1.0
+                    model_kwargs["scale_watershed"] = 1.0
 
-            if proportional_attn:
-                model_kwargs["proportional_attn"] = True
-                model_kwargs["base_seqlen"] = (train_args.image_size // 16) ** 2
-            if do_extrapolation and scaling_method == "Time-aware":
-                model_kwargs["scale_factor"] = math.sqrt(w * h / train_args.image_size ** 2)
-            else:
-                model_kwargs["scale_factor"] = 1.0
+                if dist.get_rank() == 0:
+                    print(f"> caption: {cap}")
+                    print(f"> num_sampling_steps: {num_sampling_steps}")
+                    print(f"> cfg_scale: {cfg_scale}")
 
-            print(f"> scale factor: {model_kwargs['scale_factor']}")
+                print("> start sample")
+                samples = sample_fn(z, model.forward_with_cfg, **model_kwargs)[-1]
+                samples = samples[:1]
 
-            print("> start sample")
-            samples = sample_fn(z, model.forward_with_cfg, **model_kwargs)[-1]
-            samples = samples[:1]
+                factor = 0.18215 if train_args.vae != "sdxl" else 0.13025
+                print(f"> vae factor: {factor}")
+                samples = vae.decode(samples / factor).sample
+                samples = (samples + 1.0) / 2.0
+                samples.clamp_(0.0, 1.0)
 
-            factor = 0.18215 if train_args.vae != "sdxl" else 0.13025
-            print(f"vae factor: {factor}")
+                img = to_pil_image(samples[0].float())
+                print("> generated image, done.")
 
-            samples = vae.decode(samples / factor).sample
-            samples = (samples + 1.0) / 2.0
-            samples.clamp_(0.0, 1.0)
-
-            img = to_pil_image(samples[0].float())
-
-            return img, metadata
-        except Exception:
-            print(traceback.format_exc())
-            return ModelFailure()
+                return img, metadata
+            except Exception:
+                print(traceback.format_exc())
+                return ModelFailure()
 
 
 def none_or_str(value):
@@ -335,12 +284,8 @@ def parse_transport_args(parser):
         choices=[None, "velocity", "likelihood"],
         help="the weighting of different components in the loss function, can be 'velocity' for dynamic modeling, 'likelihood' for statistical consistency, or None for no weighting.",
     )
-    group.add_argument(
-        "--sample-eps", type=float, help="sampling in the transport model."
-    )
-    group.add_argument(
-        "--train-eps", type=float, help="training to stabilize the learning process."
-    )
+    group.add_argument("--sample-eps", type=float, help="sampling in the transport model.")
+    group.add_argument("--train-eps", type=float, help="training to stabilize the learning process.")
 
 
 def parse_ode_args(parser):
@@ -357,54 +302,11 @@ def parse_ode_args(parser):
         default=1e-3,
         help="Relative tolerance for the ODE solver.",
     )
-    group.add_argument(
-        "--reverse", action="store_true", help="run the ODE solver in reverse."
-    )
+    group.add_argument("--reverse", action="store_true", help="run the ODE solver in reverse.")
     group.add_argument(
         "--likelihood",
         action="store_true",
         help="Enable calculation of likelihood during the ODE solving process.",
-    )
-
-
-def parse_sde_args(parser):
-    group = parser.add_argument_group("SDE arguments")
-    group.add_argument(
-        "--sampling-method",
-        type=str,
-        default="Euler",
-        choices=["Euler", "Heun"],
-        help="the numerical method used for sampling the stochastic differential equation: 'Euler' for simplicity or 'Heun' for improved accuracy.",
-    )
-    group.add_argument(
-        "--diffusion-form",
-        type=str,
-        default="sigma",
-        choices=[
-            "constant",
-            "SBDM",
-            "sigma",
-            "linear",
-            "decreasing",
-            "increasing-decreasing",
-        ],
-        help="form of diffusion coefficient in the SDE",
-    )
-    group.add_argument(
-        "--diffusion-norm",
-        type=float,
-        default=1.0,
-        help="Normalizes the diffusion coefficient, affecting the scale of the stochastic component.",
-    )
-    group.add_argument(
-        "--last-step",
-        type=none_or_str,
-        default="Mean",
-        choices=[None, "Mean", "Tweedie", "Euler"],
-        help="form of last step taken in the SDE",
-    )
-    group.add_argument(
-        "--last-step-size", type=float, default=0.04, help="size of the last step taken"
     )
 
 
@@ -418,7 +320,6 @@ def find_free_port() -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    mode = "ODE"
 
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--ckpt", type=str, default="/home/user/app/checkpoints")
@@ -427,15 +328,32 @@ def main():
 
     parse_transport_args(parser)
     parse_ode_args(parser)
+
     args = parser.parse_known_args()[0]
+    args.sampler_mode = "ODE"
 
     if args.num_gpus != 1:
         raise NotImplementedError("Multi-GPU Inference is not yet supported")
 
-    args.sampler_mode = mode
-
     text_encoder, tokenizer, vae, model = load_models(args, 60001, 0)
 
+    description = """
+    # Lumina Next Text-to-Image
+
+    Lumina-Next-T2I is a 2B Next-DiT model with 2B text encoder.
+
+    Demo current model: `Lumina-Next-T2I 1k Resolution`
+
+    ### <span style='color: red;'> Lumina-Next-T2I enables zero-shot resolution extrapolation to 2k.
+
+    ### Lumina-Next supports higher-order solvers ["euler", "midpoint"]. 
+    ### <span style='color: orange;'>It can generate images with merely 10 steps without any distillation for 1K resolution generation.
+
+    ### To reduce waiting times, we are offering three parallel demos:
+    
+    Lumina-T2I 2B model: [[demo (supported 2k inference)](http://106.14.2.150:10020/)] [[demo](http://106.14.2.150:10021/)] [[demo](http://106.14.2.150:10022/)] [[demo (compositional generation)](http://106.14.2.150:10023/)]
+
+    """
     with gr.Blocks() as demo:
         with gr.Row():
             gr.Markdown(description)
@@ -457,22 +375,17 @@ def main():
                     placeholder="Enter a negative caption.",
                 )
                 with gr.Row():
-                    res_choices = ["1024x1024", "512x2048", "2048x512"] + [
-                        "(Extrapolation) 2048x1920",
-                        "(Extrapolation) 1920x2048",
-                        "(Extrapolation) 1664x1664",
-                        "(Extrapolation) 1536x2560",
-                        "(Extrapolation) 2048x1024",
-                        "(Extrapolation) 1024x2048",
+                    res_choices = [
+                        "1024x1024",
+                        "512x2048",
+                        "2048x512",
                     ]
-                    resolution = gr.Dropdown(
-                        value=res_choices[0], choices=res_choices, label="Resolution"
-                    )
+                    resolution = gr.Dropdown(value=res_choices[0], choices=res_choices, label="Resolution")
                 with gr.Row():
                     num_sampling_steps = gr.Slider(
                         minimum=1,
                         maximum=70,
-                        value=10,
+                        value=30,
                         step=1,
                         interactive=True,
                         label="Sampling steps",
@@ -480,41 +393,48 @@ def main():
                     seed = gr.Slider(
                         minimum=0,
                         maximum=int(1e5),
-                        value=1,
+                        value=25,
                         step=1,
                         interactive=True,
                         label="Seed (0 for random)",
                     )
-                with gr.Accordion(
-                    "Advanced Settings for Resolution Extrapolation", open=False
-                ):
-                    with gr.Row():
-                        solver = gr.Dropdown(
-                            value="midpoint",
-                            choices=["euler", "midpoint", "rk4"],
-                            label="solver",
-                        )
-                        t_shift = gr.Slider(
-                            minimum=1,
-                            maximum=20,
-                            value=6,
-                            step=1,
-                            interactive=True,
-                            label="Time shift",
-                        )
-                        cfg_scale = gr.Slider(
-                            minimum=1.0,
-                            maximum=20.0,
-                            value=4.0,
-                            interactive=True,
-                            label="CFG scale",
-                        )
+                with gr.Row():
+                    solver = gr.Dropdown(
+                        value="midpoint",
+                        choices=["euler", "midpoint"],
+                        label="Solver",
+                    )
+                    t_shift = gr.Slider(
+                        minimum=1,
+                        maximum=20,
+                        value=6,
+                        step=1,
+                        interactive=True,
+                        label="Time shift",
+                    )
+                    cfg_scale = gr.Slider(
+                        minimum=1.0,
+                        maximum=20.0,
+                        value=4.0,
+                        interactive=True,
+                        label="CFG scale",
+                    )
+                with gr.Accordion("Advanced Settings for Resolution Extrapolation", open=False, visible=False):
                     with gr.Row():
                         scaling_method = gr.Dropdown(
-                            value="Time-aware",
-                            choices=["Time-aware", "None"],
-                            label="Rope scaling method",
+                            value="None",
+                            choices=["None"],
+                            label="RoPE scaling method",
                         )
+                        scaling_watershed = gr.Slider(
+                            minimum=0.0,
+                            maximum=1.0,
+                            value=0.3,
+                            interactive=True,
+                            label="Linear/NTK watershed",
+                            visible=False,
+                        )
+                    with gr.Row():
                         proportional_attn = gr.Checkbox(
                             value=True,
                             interactive=True,
@@ -523,11 +443,12 @@ def main():
                 with gr.Row():
                     submit_btn = gr.Button("Submit", variant="primary")
             with gr.Column():
+                default_img = Image.open("./image.png")
                 output_img = gr.Image(
-                    label="Lumina Generated image",
+                    label="Generated image",
                     interactive=False,
                     format="png",
-                    show_label=False
+                    value=default_img,
                 )
                 with gr.Accordion(label="Generation Parameters", open=True):
                     gr_metadata = gr.JSON(label="metadata", show_label=False)
@@ -535,65 +456,15 @@ def main():
         with gr.Row():
             gr.Examples(
                 [
-                    ["👽🤖👹👻"],
-                    ["🐔 playing 🏀"],
-                    ["☃️ with 🌹 in the ❄️"],
-                    ["🐶 wearing 😎  flying on 🌈 "],
-                    ["A small 🍎 and 🍊 with 😁 emoji in the Sahara desert"],
-                    ["Astronaut on Mars During sunset"],
-                    [
-                        "A scared cute rabbit in Happy Tree Friends style and punk vibe."
-                    ],
-                    ["A humanoid eagle soldier of the First World War."],  # noqa
-                    [
-                        "A cute Christmas mockup on an old wooden industrial desk table with Christmas decorations and bokeh lights in the background."
-                    ],
-                    [
-                        "A front view of a romantic flower shop in France filled with various blooming flowers including lavenders and roses."
-                    ],
-                    [
-                        "An old man, portrayed as a retro superhero, stands in the streets of New York City at night"
-                    ],
-                    [
-                        "many trees are surrounded by a lake in autumn colors, in the style of nature-inspired imagery, havencore, brightly colored, dark white and dark orange, bright primary colors, environmental activism, forestpunk"
-                    ],
-                    [
-                        "A fluffy mouse holding a watermelon, in a magical and colorful setting, illustrated in the style of Hayao Miyazaki anime by Studio Ghibli."
-                    ],
-                    ["孤舟蓑笠翁"],
-                    ["两只黄鹂鸣翠柳"],
-                    ["大漠孤烟直，长河落日圆"],
-                    ["秋风起兮白云飞，草木黄落兮雁南归"],
-                    ["味噌ラーメン, 最高品質の浮世絵、江戸時代。"],
-                    ["東京タワー、最高品質の浮世絵、江戸時代。"],
-                    ["도쿄 타워, 최고 품질의 우키요에, 에도 시대"],
-                    [
-                        "Tour de Tokyo, estampes ukiyo-e de la plus haute qualité, période Edo"
-                    ],
-                    ["Токийская башня, лучшие укиё-э, период Эдо"],
-                    ["Tokio-Turm, hochwertigste Ukiyo-e, Edo-Zeit"],
-                    [
-                        "Inka warrior with a war make up, medium shot, natural light, Award winning wildlife photography, hyperrealistic, 8k resolution"
-                    ],
-                    [
-                        "Character of lion in style of saiyan, mafia, gangsta, citylights background, Hyper detailed, hyper realistic, unreal engine ue5, cgi 3d, cinematic shot, 8k"
-                    ],
-                    [
-                        "In the sky above, a giant, whimsical cloud shaped like the 😊 emoji casts a soft, golden light over the scene"
-                    ],
-                    [
-                        "Cyberpunk eagle, neon ambiance, abstract black oil, gear mecha, detailed acrylic, grunge, intricate complexity, rendered in unreal engine 5, photorealistic, 8k"
-                    ],
-                    [
-                        "close-up photo of a beautiful red rose breaking through a cube made of ice , splintered cracked ice surface, frosted colors, blood dripping from rose, melting ice, Valentine’s Day vibes, cinematic, sharp focus, intricate, cinematic, dramatic light"
-                    ],
-                    [
-                        "3D cartoon Fox Head with Human Body, Wearing Iridescent Holographic Liquid Texture & Translucent Material Sun Protective Shirt, Boss Feel, Nike or Addidas Sun Protective Shirt, WitchPunk, Y2K Style, Green and blue, Blue, Metallic Feel, Strong Reflection, plain background, no background, pure single color background, Digital Fashion, Surreal Futurism, Supreme Kong NFT Artwork Style, disney style, headshot photography for portrait studio shoot, fashion editorial aesthetic, high resolution in the style of HAPE PRIME NFT, NFT 3D IP Feel, Bored Ape Yacht Club NFT project Feel, high detail, fine luster, 3D render, oc render, best quality, 8K, bright, front lighting, Face Shot, fine luster, ultra detailed"
-                    ],
+                    ["An old sailor, weathered by years at sea, stands at the helm of his ship, eyes scanning the horizon for signs of land, his face lined with tales of adventure and hardship."],  # noqa
+                    ["A regal swan glides gracefully across the surface of a tranquil lake, its snowy white feathers ruffled by the gentle breeze."],  # noqa
+                    ["A cunning fox, agilely weaving through the forest, its eyes sharp and alert, always ready for prey."],  # noqa
+                    ["Inka warrior with a war make up, medium shot, natural light, Award winning wildlife photography, hyperrealistic, 8k resolution."],  # noqa
+                    ["Quaint rustic witch's cabin by the lake, autumn forest background, orange and honey colors, beautiful composition, magical, warm glowing lighting, cloudy, dreamy masterpiece, Nikon D610, photorealism, highly artistic, highly detailed, ultra high resolution, sharp focus, Mysterious."],  # noqa
                 ],
                 [cap],
                 label="Examples",
-                examples_per_page=22,
+                examples_per_page=80,
             )
 
         @spaces.GPU(duration=200)
@@ -601,7 +472,7 @@ def main():
             result = infer_ode(args, infer_args, text_encoder, tokenizer, vae, model)
             if isinstance(result, ModelFailure):
                 raise RuntimeError("Model failed to generate the image.")
-            return result            
+            return result
 
         submit_btn.click(
             on_submit,
@@ -615,12 +486,18 @@ def main():
                 t_shift,
                 seed,
                 scaling_method,
+                scaling_watershed,
                 proportional_attn,
             ],
             [output_img, gr_metadata],
         )
 
-    demo.queue().launch()
+        def show_scaling_watershed(scaling_m):
+            return gr.update(visible=scaling_m == "Time-aware")
+
+        scaling_method.change(show_scaling_watershed, scaling_method, scaling_watershed)
+
+    demo.queue().launch(server_name="0.0.0.0")
 
 
 if __name__ == "__main__":
