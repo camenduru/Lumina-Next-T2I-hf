@@ -443,12 +443,10 @@ def main():
                 with gr.Row():
                     submit_btn = gr.Button("Submit", variant="primary")
             with gr.Column():
-                default_img = Image.open("./image.png")
                 output_img = gr.Image(
                     label="Generated image",
                     interactive=False,
-                    format="png",
-                    value=default_img,
+                    format="png"
                 )
                 with gr.Accordion(label="Generation Parameters", open=True):
                     gr_metadata = gr.JSON(label="metadata", show_label=False)
