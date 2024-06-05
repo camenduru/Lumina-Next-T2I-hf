@@ -167,9 +167,9 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
                 solver=solver,
                 t_shift=t_shift,
                 seed=seed,
-                scaling_method=scaling_method,
-                scaling_watershed=scaling_watershed,
-                proportional_attn=proportional_attn,
+                # scaling_method=scaling_method,
+                # scaling_watershed=scaling_watershed,
+                # proportional_attn=proportional_attn,
             )
             print("> params:", json.dumps(metadata, indent=2))
 
