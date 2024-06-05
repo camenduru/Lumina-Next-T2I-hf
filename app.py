@@ -31,7 +31,6 @@ import gradio as gr
 import numpy as np
 from safetensors.torch import load_file
 import torch
-import torch.distributed as dist
 from torchvision.transforms.functional import to_pil_image
 
 import models
@@ -231,10 +230,6 @@ def infer_ode(args, infer_args, text_encoder, tokenizer, vae, model):
                     model_kwargs["scale_factor"] = 1.0
                     model_kwargs["scale_watershed"] = 1.0
 
-                if dist.get_rank() == 0:
-                    print(f"> caption: {cap}")
-                    print(f"> num_sampling_steps: {num_sampling_steps}")
-                    print(f"> cfg_scale: {cfg_scale}")
 
                 print("> start sample")
                 samples = sample_fn(z, model.forward_with_cfg, **model_kwargs)[-1]
