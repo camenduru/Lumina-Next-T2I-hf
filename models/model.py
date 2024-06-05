@@ -1,9 +1,17 @@
-import functools
-import logging
-import math
-from typing import Optional, Tuple, List
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
 
-from .components import RMSNorm
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+# --------------------------------------------------------
+# References:
+# GLIDE: https://github.com/openai/glide-text2im
+# MAE: https://github.com/facebookresearch/mae/blob/main/models_mae.py
+# --------------------------------------------------------
+
+import math
+from typing import List, Optional, Tuple
+
 from flash_attn import flash_attn_varlen_func
 from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
 import torch
@@ -11,7 +19,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
-logger = logging.getLogger(__name__)
+from .components import RMSNorm
 
 
 def modulate(x, scale):
@@ -57,17 +65,13 @@ class ParallelTimestepEmbedder(nn.Module):
         """
         # https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
         half = dim // 2
-        freqs = torch.exp(
-            -math.log(max_period)
-            * torch.arange(start=0, end=half, dtype=torch.float32)
-            / half
-        ).to(device=t.device)
+        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
+            device=t.device
+        )
         args = t[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:
-            embedding = torch.cat(
-                [embedding, torch.zeros_like(embedding[:, :1])], dim=-1
-            )
+            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
         return embedding
 
     def forward(self, t):
@@ -85,8 +89,7 @@ class ParallelLabelEmbedder(nn.Module):
         super().__init__()
         use_cfg_embedding = int(dropout_prob > 0)
         self.embedding_table = nn.Embedding(
-            num_classes + use_cfg_embedding,
-            hidden_size,
+            num_classes + use_cfg_embedding
         )
         self.num_classes = num_classes
         self.dropout_prob = dropout_prob
@@ -96,9 +99,7 @@ class ParallelLabelEmbedder(nn.Module):
         Drops labels to enable classifier-free guidance.
         """
         if force_drop_ids is None:
-            drop_ids = (
-                torch.rand(labels.shape[0], device=labels.device) < self.dropout_prob
-            )
+            drop_ids = torch.rand(labels.shape[0], device=labels.device) < self.dropout_prob
             drop_ids = drop_ids.cuda()
             drop_ids = drop_ids.to(labels.device)
         else:
@@ -141,10 +142,9 @@ class Attention(nn.Module):
         """
         super().__init__()
         self.n_kv_heads = n_heads if n_kv_heads is None else n_kv_heads
-        model_parallel_size = 1
-        self.n_local_heads = n_heads // model_parallel_size
-        self.n_local_kv_heads = self.n_kv_heads // model_parallel_size
-        self.n_rep = self.n_local_heads // self.n_local_kv_heads
+        self.n_heads = n_heads
+        self.n_kv_heads = self.n_kv_heads
+        self.n_rep = self.n_heads // self.n_kv_heads
         self.head_dim = dim // n_heads
 
         self.wq = nn.Linear(
@@ -173,7 +173,7 @@ class Attention(nn.Module):
                 self.n_kv_heads * self.head_dim,
                 bias=False,
             )
-            self.gate = nn.Parameter(torch.zeros([self.n_local_heads]))
+            self.gate = nn.Parameter(torch.zeros([self.n_heads]))
 
         self.wo = nn.Linear(
             n_heads * self.head_dim,
@@ -182,10 +182,10 @@ class Attention(nn.Module):
         )
 
         if qk_norm:
-            self.q_norm = nn.LayerNorm(self.n_local_heads * self.head_dim)
-            self.k_norm = nn.LayerNorm(self.n_local_kv_heads * self.head_dim)
+            self.q_norm = nn.LayerNorm(self.n_heads * self.head_dim)
+            self.k_norm = nn.LayerNorm(self.n_kv_heads * self.head_dim)
             if y_dim > 0:
-                self.ky_norm = nn.LayerNorm(self.n_local_kv_heads * self.head_dim)
+                self.ky_norm = nn.LayerNorm(self.n_kv_heads * self.head_dim)
             else:
                 self.ky_norm = nn.Identity()
         else:
@@ -255,17 +255,12 @@ class Attention(nn.Module):
             return x_out.type_as(x_in)
 
     # copied from huggingface modeling_llama.py
-    def _upad_input(
-        self, query_layer, key_layer, value_layer, attention_mask, query_length
-    ):
-
+    def _upad_input(self, query_layer, key_layer, value_layer, attention_mask, query_length):
         def _get_unpad_data(attention_mask):
             seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
             indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
             max_seqlen_in_batch = seqlens_in_batch.max().item()
-            cu_seqlens = F.pad(
-                torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.int32), (1, 0)
-            )
+            cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.int32), (1, 0))
             return (
                 indices,
                 cu_seqlens,
@@ -285,9 +280,7 @@ class Attention(nn.Module):
         )
         if query_length == kv_seq_len:
             query_layer = index_first_axis(
-                query_layer.reshape(
-                    batch_size * kv_seq_len, self.n_local_heads, head_dim
-                ),
+                query_layer.reshape(batch_size * kv_seq_len, self.n_heads, head_dim),
                 indices_k,
             )
             cu_seqlens_q = cu_seqlens_k
@@ -303,9 +296,7 @@ class Attention(nn.Module):
         else:
             # The -q_len: slice assumes left padding.
             attention_mask = attention_mask[:, -query_length:]
-            query_layer, indices_q, cu_seqlens_q, max_seqlen_in_batch_q = unpad_input(
-                query_layer, attention_mask
-            )
+            query_layer, indices_q, cu_seqlens_q, max_seqlen_in_batch_q = unpad_input(query_layer, attention_mask)
 
         return (
             query_layer,
@@ -343,14 +334,19 @@ class Attention(nn.Module):
         xq = self.q_norm(xq)
         xk = self.k_norm(xk)
 
-        xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-        xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
+        xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
+        xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
+        xv = xv.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
         xq = Attention.apply_rotary_emb(xq, freqs_cis=freqs_cis)
         xk = Attention.apply_rotary_emb(xk, freqs_cis=freqs_cis)
 
         xq, xk = xq.to(dtype), xk.to(dtype)
+
+        if self.proportional_attn:
+            softmax_scale = math.sqrt(math.log(seqlen, self.base_seqlen) / self.head_dim)
+        else:
+            softmax_scale = math.sqrt(1 / self.head_dim)
 
         if dtype in [torch.float16, torch.bfloat16]:
             # begin var_len flash attn
@@ -365,13 +361,6 @@ class Attention(nn.Module):
 
             cu_seqlens_q, cu_seqlens_k = cu_seq_lens
             max_seqlen_in_batch_q, max_seqlen_in_batch_k = max_seq_lens
-
-            if self.proportional_attn:
-                softmax_scale = math.sqrt(
-                    math.log(seqlen, self.base_seqlen) / self.head_dim
-                )
-            else:
-                softmax_scale = math.sqrt(1 / self.head_dim)
 
             attn_output_unpad = flash_attn_varlen_func(
                 query_states,
@@ -394,21 +383,17 @@ class Attention(nn.Module):
                     xq.permute(0, 2, 1, 3),
                     xk.permute(0, 2, 1, 3),
                     xv.permute(0, 2, 1, 3),
-                    attn_mask=x_mask.bool()
-                    .view(bsz, 1, 1, seqlen)
-                    .expand(-1, self.n_local_heads, seqlen, -1),
+                    attn_mask=x_mask.bool().view(bsz, 1, 1, seqlen).expand(-1, self.n_heads, seqlen, -1),
+                    scale=softmax_scale,
                 )
                 .permute(0, 2, 1, 3)
                 .to(dtype)
             )
 
         if hasattr(self, "wk_y"):
-            # todo better flash_attn support
-            yk = self.ky_norm(self.wk_y(y)).view(
-                bsz, -1, self.n_local_kv_heads, self.head_dim
-            )
-            yv = self.wv_y(y).view(bsz, -1, self.n_local_kv_heads, self.head_dim)
-            n_rep = self.n_local_heads // self.n_local_kv_heads
+            yk = self.ky_norm(self.wk_y(y)).view(bsz, -1, self.n_kv_heads, self.head_dim)
+            yv = self.wv_y(y).view(bsz, -1, self.n_kv_heads, self.head_dim)
+            n_rep = self.n_heads // self.n_kv_heads
             if n_rep >= 1:
                 yk = yk.unsqueeze(3).repeat(1, 1, 1, n_rep, 1).flatten(2, 3)
                 yv = yv.unsqueeze(3).repeat(1, 1, 1, n_rep, 1).flatten(2, 3)
@@ -416,7 +401,7 @@ class Attention(nn.Module):
                 xq.permute(0, 2, 1, 3),
                 yk.permute(0, 2, 1, 3),
                 yv.permute(0, 2, 1, 3),
-                y_mask.view(bsz, 1, 1, -1).expand(bsz, self.n_local_heads, seqlen, -1),
+                y_mask.view(bsz, 1, 1, -1).expand(bsz, self.n_heads, seqlen, -1),
             ).permute(0, 2, 1, 3)
             output_y = output_y * self.gate.tanh().view(1, 1, -1, 1)
             output = output + output_y
@@ -534,9 +519,9 @@ class TransformerBlock(nn.Module):
         )
         self.layer_id = layer_id
         self.attention_norm1 = RMSNorm(dim, eps=norm_eps)
-        self.attention_norm2 = RMSNorm(dim, eps=norm_eps)
-        
         self.ffn_norm1 = RMSNorm(dim, eps=norm_eps)
+
+        self.attention_norm2 = RMSNorm(dim, eps=norm_eps)
         self.ffn_norm2 = RMSNorm(dim, eps=norm_eps)
 
         self.adaLN_modulation = nn.Sequential(
@@ -583,33 +568,28 @@ class TransformerBlock(nn.Module):
                     y_mask,
                 )
             )
-            d = x.shape[-1]
             x = x + gate_mlp.unsqueeze(1).tanh() * self.ffn_norm2(
                 self.feed_forward(
-                    modulate(self.ffn_norm1(x), scale_mlp).view(-1, d),
-                ).view(*x.shape)
+                    modulate(self.ffn_norm1(x), scale_mlp),
+                )
             )
 
         else:
-            x = x + self.attention_norm1(
+            x = x + self.attention_norm2(
                 self.attention(
-                    self.attention_norm(x),
+                    self.attention_norm1(x),
                     x_mask,
                     freqs_cis,
                     self.attention_y_norm(y),
                     y_mask,
                 )
             )
-            # for compatibility with torch.compile because the sequence length changes
-            B, L, D = x.shape
-            x = x.view(B * L, D)
-            x = x + self.ffn_norm1(self.feed_forward(self.ffn_norm(x)))
-            x = x.view(B, L, D)
+            x = x + self.ffn_norm2(self.feed_forward(self.ffn_norm1(x)))
 
         return x
 
 
-class ParallelFinalLayer(nn.Module):
+class FinalLayer(nn.Module):
     """
     The final layer of NextDiT.
     """
@@ -624,19 +604,18 @@ class ParallelFinalLayer(nn.Module):
         self.linear = nn.Linear(
             hidden_size,
             patch_size * patch_size * out_channels,
-            bias=True,
         )
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
             nn.Linear(
                 min(hidden_size, 1024),
                 hidden_size,
-                bias=True,
             ),
         )
 
     def forward(self, x, c):
         scale = self.adaLN_modulation(c)
+
         x = modulate(self.norm_final(x), scale)
         x = self.linear(x)
         return x
@@ -661,7 +640,6 @@ class NextDiT(nn.Module):
         learn_sigma: bool = True,
         qk_norm: bool = False,
         cap_feat_dim: int = 5120,
-        rope_scaling_factor: float = 1.0,
         scale_factor: float = 1.0,
     ) -> None:
         super().__init__()
@@ -703,27 +681,21 @@ class NextDiT(nn.Module):
                 for layer_id in range(n_layers)
             ]
         )
-        self.final_layer = ParallelFinalLayer(dim, patch_size, self.out_channels)
+        self.final_layer = FinalLayer(dim, patch_size, self.out_channels)
 
         assert (dim // n_heads) % 4 == 0, "2d rope needs head dim to be divisible by 4"
-        self.dim = dim
-        self.n_heads = n_heads
         self.freqs_cis = NextDiT.precompute_freqs_cis(
             dim // n_heads,
             384,
-            rope_scaling_factor=rope_scaling_factor,
             scale_factor=scale_factor,
         )
-        self.rope_scaling_factor = rope_scaling_factor
+        self.dim = dim
+        self.n_heads = n_heads
         self.scale_factor = scale_factor
-        # self.eol_token = nn.Parameter(torch.empty(dim))
         self.pad_token = nn.Parameter(torch.empty(dim))
-        # nn.init.normal_(self.eol_token, std=0.02)
         nn.init.normal_(self.pad_token, std=0.02)
 
-    def unpatchify(
-        self, x: torch.Tensor, img_size: List[Tuple[int, int]], return_tensor=False
-    ) -> List[torch.Tensor]:
+    def unpatchify(self, x: torch.Tensor, img_size: List[Tuple[int, int]], return_tensor=False) -> List[torch.Tensor]:
         """
         x: (N, T, patch_size**2 * C)
         imgs: (N, H, W, C)
@@ -757,18 +729,12 @@ class NextDiT(nn.Module):
         if isinstance(x, torch.Tensor):
             pH = pW = self.patch_size
             B, C, H, W = x.size()
-            x = (
-                x.view(B, C, H // pH, pH, W // pW, pW)
-                .permute(0, 2, 4, 1, 3, 5)
-                .flatten(3)
-            )
+            x = x.view(B, C, H // pH, pH, W // pW, pW).permute(0, 2, 4, 1, 3, 5).flatten(3)
             x = self.x_embedder(x)
             x = x.flatten(1, 2)
 
-            mask = torch.ones(
-                x.shape[0], x.shape[1], dtype=torch.int32, device=x.device
-            )
-            # leave the first line for text
+            mask = torch.ones(x.shape[0], x.shape[1], dtype=torch.int32, device=x.device)
+
             return (
                 x,
                 mask,
@@ -787,20 +753,14 @@ class NextDiT(nn.Module):
                 item_freqs_cis = self.freqs_cis[: H // pH, : W // pW]
                 freqs_cis.append(item_freqs_cis.flatten(0, 1))
                 img_size.append((H, W))
-                img = (
-                    img.view(C, H // pH, pH, W // pW, pW)
-                    .permute(1, 3, 0, 2, 4)
-                    .flatten(2)
-                )
+                img = img.view(C, H // pH, pH, W // pW, pW).permute(1, 3, 0, 2, 4).flatten(2)
                 img = self.x_embedder(img)
                 img = img.flatten(0, 1)
                 l_effective_seq_len.append(len(img))
                 x_embed.append(img)
 
             max_seq_len = max(l_effective_seq_len)
-            mask = torch.zeros(
-                len(x), max_seq_len, dtype=torch.int32, device=x[0].device
-            )
+            mask = torch.zeros(len(x), max_seq_len, dtype=torch.int32, device=x[0].device)
             padded_x_embed = []
             padded_freqs_cis = []
             for i, (item_embed, item_freqs_cis, item_seq_len) in enumerate(
@@ -809,9 +769,7 @@ class NextDiT(nn.Module):
                 item_embed = torch.cat(
                     [
                         item_embed,
-                        self.pad_token.view(1, -1).expand(
-                            max_seq_len - item_seq_len, -1
-                        ),
+                        self.pad_token.view(1, -1).expand(max_seq_len - item_seq_len, -1),
                     ],
                     dim=0,
                 )
@@ -840,13 +798,9 @@ class NextDiT(nn.Module):
         x, mask, img_size, freqs_cis = self.patchify_and_embed(x)
         freqs_cis = freqs_cis.to(x.device)
 
-        # cap_freqs_cis = self.freqs_cis[:1, :cap_feats.shape[1]].to(x.device)
-
         t = self.t_embedder(t)  # (N, D)
         cap_mask_float = cap_mask.float().unsqueeze(-1)
-        cap_feats_pool = (cap_feats * cap_mask_float).sum(dim=1) / cap_mask_float.sum(
-            dim=1
-        )
+        cap_feats_pool = (cap_feats * cap_mask_float).sum(dim=1) / cap_mask_float.sum(dim=1)
         cap_feats_pool = cap_feats_pool.to(cap_feats)
         cap_emb = self.cap_embedder(cap_feats_pool)
         adaln_input = t + cap_emb
@@ -871,25 +825,23 @@ class NextDiT(nn.Module):
         cap_feats,
         cap_mask,
         cfg_scale,
-        rope_scaling_factor=None,
-        scale_factor=None,
+        scale_factor=1.0,
+        scale_watershed=1.0,
         base_seqlen: Optional[int] = None,
         proportional_attn: bool = False,
     ):
-        # """
-        # Forward pass of NextDiT, but also batches the unconNextditional forward pass
-        # for classifier-free guidance.
-        # """
+        """
+        Forward pass of NextDiT, but also batches the unconditional forward pass
+        for classifier-free guidance.
+        """
         # # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
-        # print(ntk_factor, rope_scaling_factor, self.ntk_factor, self.rope_scaling_factor)
-        if scale_factor is not None:
-            assert scale_factor is not None
-            self.freqs_cis = NextDiT.precompute_freqs_cis(
-                self.dim // self.n_heads,
-                384,
-                scale_factor=scale_factor,
-                timestep=t[0],
-            )
+        self.freqs_cis = NextDiT.precompute_freqs_cis(
+            self.dim // self.n_heads,
+            384,
+            scale_factor=scale_factor,
+            scale_watershed=scale_watershed,
+            timestep=t[0].item(),
+        )
 
         if proportional_attn:
             assert base_seqlen is not None
@@ -903,7 +855,7 @@ class NextDiT(nn.Module):
 
         half = x[: len(x) // 2]
         combined = torch.cat([half, half], dim=0)
-        model_out = self.forward(combined, t, cap_feats, cap_mask)
+        model_out = self(combined, t, cap_feats, cap_mask)
         # For exact reproducibility reasons, we apply classifier-free guidance on only
         # three channels by default. The standard approach to cfg applies it to all channels.
         # This can be done by uncommenting the following line and commenting-out the line following that.
@@ -912,6 +864,7 @@ class NextDiT(nn.Module):
         cond_eps, uncond_eps = torch.split(eps, len(eps) // 2, dim=0)
         half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
         eps = torch.cat([half_eps, half_eps], dim=0)
+
         return torch.cat([eps, rest], dim=1)
 
     @staticmethod
@@ -919,8 +872,8 @@ class NextDiT(nn.Module):
         dim: int,
         end: int,
         theta: float = 10000.0,
-        rope_scaling_factor: float = 1.0,
         scale_factor: float = 1.0,
+        scale_watershed: float = 1.0,
         timestep: float = 1.0,
     ):
         """
@@ -942,15 +895,16 @@ class NextDiT(nn.Module):
             torch.Tensor: Precomputed frequency tensor with complex
                 exponentials.
         """
-        freqs_inter = 1.0 / (theta ** (torch.arange(0, dim, 4)[: (dim // 4)].float().cuda() / dim)) / scale_factor
 
-        target_dim = timestep * dim + 1
-        scale_factor = scale_factor ** (dim / target_dim)
-        theta = theta * scale_factor
+        if timestep < scale_watershed:
+            linear_factor = scale_factor
+            ntk_factor = 1.0
+        else:
+            linear_factor = 1.0
+            ntk_factor = scale_factor
 
-        freqs_time_scaled = 1.0 / (theta ** (torch.arange(0, dim, 4)[: (dim // 4)].float().cuda() / dim))
-
-        freqs = torch.max(freqs_inter, freqs_time_scaled)
+        theta = theta * ntk_factor
+        freqs = 1.0 / (theta ** (torch.arange(0, dim, 4)[: (dim // 4)].float().cuda() / dim)) / linear_factor
 
         timestep = torch.arange(end, device=freqs.device, dtype=torch.float)  # type: ignore
 
@@ -960,20 +914,14 @@ class NextDiT(nn.Module):
         freqs_cis_h = freqs_cis.view(end, 1, dim // 4, 1).repeat(1, end, 1, 1)
         freqs_cis_w = freqs_cis.view(1, end, dim // 4, 1).repeat(end, 1, 1, 1)
         freqs_cis = torch.cat([freqs_cis_h, freqs_cis_w], dim=-1).flatten(2)
-        
+
         return freqs_cis
 
     def parameter_count(self) -> int:
-        tensor_parallel_module_list = (
-            nn.Linear,
-            nn.Linear,
-            nn.Embedding,
-        )
         total_params = 0
 
         def _recursive_count_params(module):
             nonlocal total_params
-            is_tp_module = isinstance(module, tensor_parallel_module_list)
             for param in module.parameters(recurse=False):
                 total_params += param.numel()
             for submodule in module.children():
@@ -991,6 +939,7 @@ class NextDiT(nn.Module):
 #############################################################################
 def NextDiT_2B_patch2(**kwargs):
     return NextDiT(patch_size=2, dim=2304, n_layers=24, n_heads=32, **kwargs)
+
 
 def NextDiT_2B_GQA_patch2(**kwargs):
     return NextDiT(patch_size=2, dim=2304, n_layers=24, n_heads=32, n_kv_heads=8, **kwargs)
