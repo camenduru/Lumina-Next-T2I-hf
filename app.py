@@ -10,7 +10,7 @@ subprocess.run(
 os.makedirs("/home/user/app/checkpoints", exist_ok=True)
 from huggingface_hub import snapshot_download
 snapshot_download(
-    repo_id="Alpha-VLLM/Lumina-Next-T2I", local_dir="/home/user/app/checkpoints"
+    repo_id="Alpha-VLLM/Lumina-Next-2B-HQ-SFT", local_dir="/home/user/app/checkpoints"
 )
 
 hf_token = os.environ["HF_TOKEN"]
@@ -104,7 +104,7 @@ def load_models(args, master_port, rank):
     ).eval()
     cap_feat_dim = text_encoder.config.hidden_size
 
-    tokenizer = AutoTokenizer.from_pretrained("google/gemma-2b", token=hf_token)
+    tokenizer = AutoTokenizer.from_pretrained("google/gemma-2b", token=hf_token, add_bos_token=True, add_eos_token=True)
     tokenizer.padding_side = "right"
 
 
