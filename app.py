@@ -337,7 +337,7 @@ def main():
 
     Lumina-Next-T2I is a 2B Next-DiT model with 2B text encoder.
 
-    Demo current model: `Lumina-Next-T2I 1k Resolution`
+    Demo current model: `Lumina-Next-2B-HQ-SFT 1k Resolution`
 
     ### <span style='color: red;'> Lumina-Next-T2I enables zero-shot resolution extrapolation to 2k.
 
