@@ -343,10 +343,11 @@ def main():
 
     ### Lumina-Next supports higher-order solvers ["euler", "midpoint"]. 
     ### <span style='color: orange;'>It can generate images with merely 10 steps without any distillation for 1K resolution generation.
+    ### <span style='color: orange;'>Tip: For improved human portrait generation, please choose resolution at 1024x2048.
 
     ### To reduce waiting times, we are offering three parallel demos:
     
-    Lumina-T2I 2B model: [[demo (supported 2k inference)](http://106.14.2.150:10020/)] [[demo](http://106.14.2.150:10021/)] [[demo](http://106.14.2.150:10022/)] [[demo (compositional generation)](http://106.14.2.150:10023/)]
+    Lumina-T2I 2B model: [[demo (supported 2k inference)](http://106.14.2.150:10020/)] [[demo (supported 2k inference)](http://106.14.2.150:10021/)] [[demo (supported 2k inference)](http://106.14.2.150:10022/)] [[demo (compositional generation)](http://106.14.2.150:10023/)]
 
     """
     with gr.Blocks() as demo:
@@ -374,6 +375,10 @@ def main():
                         "1024x1024",
                         "512x2048",
                         "2048x512",
+                        "(Extrapolation) 1536x1536",
+                        "(Extrapolation) 2048x1024",
+                        "(Extrapolation) 1024x2048",
+                        
                     ]
                     resolution = gr.Dropdown(value=res_choices[0], choices=res_choices, label="Resolution")
                 with gr.Row():
