@@ -333,9 +333,9 @@ def main():
     text_encoder, tokenizer, vae, model = load_models(args, 60001, 0)
 
     description = """
-    # Lumina Next Text-to-Image
+    # Lumina-Next-SFT
 
-    Lumina-Next-SFT is a 2B Next-DiT model with 2B text encoder.
+    Lumina-Next-SFT is a 2B Next-DiT model with Gemma-2B serving as the text encoder, enhanced through high-quality supervised fine-tuning (SFT).
 
     Demo current model: `Lumina-Next-SFT 1k Resolution`
 
