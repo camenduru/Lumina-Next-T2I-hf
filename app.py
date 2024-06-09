@@ -10,7 +10,7 @@ subprocess.run(
 os.makedirs("/home/user/app/checkpoints", exist_ok=True)
 from huggingface_hub import snapshot_download
 snapshot_download(
-    repo_id="Alpha-VLLM/Lumina-Next-2B-HQ-SFT", local_dir="/home/user/app/checkpoints"
+    repo_id="Alpha-VLLM/Lumina-Next-SFT", local_dir="/home/user/app/checkpoints"
 )
 
 hf_token = os.environ["HF_TOKEN"]
@@ -335,9 +335,9 @@ def main():
     description = """
     # Lumina Next Text-to-Image
 
-    Lumina-Next-T2I is a 2B Next-DiT model with 2B text encoder.
+    Lumina-Next-SFT is a 2B Next-DiT model with 2B text encoder.
 
-    Demo current model: `Lumina-Next-2B-HQ-SFT 1k Resolution`
+    Demo current model: `Lumina-Next-SFT 1k Resolution`
 
     ### <span style='color: red;'> Lumina-Next-T2I enables zero-shot resolution extrapolation to 2k.
 
