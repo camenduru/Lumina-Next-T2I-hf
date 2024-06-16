@@ -26,7 +26,6 @@ import socket
 import traceback
 
 from PIL import Image
-import spaces
 import gradio as gr
 import numpy as np
 from safetensors.torch import load_file
@@ -350,7 +349,7 @@ def main():
     Lumina-T2I 2B model: [[demo (supported 2k inference)](http://106.14.2.150:10020/)] [[demo (supported 2k inference)](http://106.14.2.150:10021/)] [[demo (supported 2k inference)](http://106.14.2.150:10022/)] [[demo (compositional generation)](http://106.14.2.150:10023/)]
 
     """
-    with gr.Blocks() as demo:
+    with gr.Blocks(analytics_enabled=False) as demo:
         with gr.Row():
             gr.Markdown(description)
         with gr.Row():
@@ -465,7 +464,6 @@ def main():
                 examples_per_page=80,
             )
 
-        @spaces.GPU(duration=200)
         def on_submit(*infer_args, progress=gr.Progress(track_tqdm=True),):
             result = infer_ode(args, infer_args, text_encoder, tokenizer, vae, model)
             if isinstance(result, ModelFailure):
